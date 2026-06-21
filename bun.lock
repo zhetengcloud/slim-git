@@ -54,6 +54,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@slim-git/core": "workspace:*",
+        "@slim-git/http": "workspace:*",
         "@slim-git/memory": "workspace:*",
         "@slim-git/types": "workspace:*",
         "rxjs": "^7.8.1",
