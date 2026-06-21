@@ -80,6 +80,8 @@ bun run fmt       # format with oxfmt
 bun run fmt:check # check formatting
 ```
 
+Optional round-trip tests against canonical `git` are skipped automatically when `git` is not installed.
+
 ## Architecture
 
 ```text
@@ -113,7 +115,7 @@ Phases follow [`plan.md`](./plan.md):
 - [x] Phase 3 — Diff
 - [x] Phase 4 — Remotes (smart HTTP fetch/push foundation)
 - [x] Phase 5 — Merge (fast-forward + three-way conflict markers) and `.gitignore`
-- [ ] Phase 6 — Polish, docs, benchmarks
+- [x] Phase 6 — Polish, docs, type consistency, canonical Git round-trip tests
 - [ ] Phase 7 — Optional TypeORM SQL acceleration
 
 ## Design principles
