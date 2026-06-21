@@ -36,6 +36,7 @@ import { TreeBuilder } from "./tree-builder.js";
 import type { TreeEntryMap } from "./tree-utils.js";
 import { findInTree$, flattenTree$ } from "./tree-utils.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
+import { isIgnored, parseGitignore, type GitignorePattern } from "./gitignore.js";
 import { diffHeadRef, diffIndexHead, diffWorktreeIndex } from "./repository-diff.js";
 import { fastForwardMerge, merge, type MergeOptions } from "./repository-merge.js";
 import { addRemote, listRemotes, removeRemote } from "./repository-remotes.js";
@@ -203,15 +204,18 @@ export class Repository {
       this.indexStore.read(),
       this.workspace.listFiles(),
       this.readHeadTree$(),
+      this.readGitignore$(),
     ]).pipe(
-      concatMap(([index, workspaceFiles, headTree]) =>
+      concatMap(([index, workspaceFiles, headTree, ignorePatterns]) =>
         this.computeStaged$(index, headTree).pipe(
           concatMap((staged) =>
             this.computeTrackedChanges$(index).pipe(map((changes) => ({ staged, ...changes }))),
           ),
           map(({ staged, modified, deleted }) => {
             const tracked = new Set(index.paths);
-            const untracked = workspaceFiles.filter((path) => !tracked.has(path));
+            const untracked = workspaceFiles.filter(
+              (path) => !tracked.has(path) && !isIgnored(path, ignorePatterns),
+            );
             return { staged, modified, deleted, untracked };
           }),
         ),
@@ -228,6 +232,21 @@ export class Repository {
         }
         return this.readCommitTree$(head);
       }),
+    );
+  }
+
+  /** Reads `.gitignore` from the workspace and parses it into ordered rules. */
+  private readGitignore$(): Observable<readonly GitignorePattern[]> {
+    return this.workspace.exists(".gitignore").pipe(
+      concatMap((exists) => {
+        if (!exists) {
+          return of("");
+        }
+        return this.workspace
+          .readFile(".gitignore")
+          .pipe(map((content) => new TextDecoder().decode(content)));
+      }),
+      map((content) => parseGitignore(content)),
     );
   }
 
@@ -299,31 +318,35 @@ export class Repository {
     ).pipe(map((changes) => changes.filter((path): path is string => path !== undefined)));
   }
 
-  /** Stages workspace files as blobs in the index. */
+  /** Stages workspace files as blobs in the index, skipping ignored paths. */
   add(paths: readonly string[]): Observable<AddResult> {
-    return this.indexStore.read().pipe(
-      concatMap((index) =>
-        paths.reduce<Observable<Index>>(
-          (index$, path) =>
-            index$.pipe(
-              concatMap((currentIndex) =>
-                this.workspace.readFile(path).pipe(
-                  concatMap((content) =>
-                    this.objectStore
-                      .write("blob", content)
-                      .pipe(map((blob) => ({ blob, content }))),
-                  ),
-                  map(({ blob, content }) =>
-                    currentIndex.add(createIndexEntry(path, blob.oid, content)),
+    return combineLatest([this.indexStore.read(), this.readGitignore$()]).pipe(
+      concatMap(([index, ignorePatterns]) => {
+        const allowedPaths = paths.filter((path) => !isIgnored(path, ignorePatterns));
+        return allowedPaths
+          .reduce<Observable<Index>>(
+            (index$, path) =>
+              index$.pipe(
+                concatMap((currentIndex) =>
+                  this.workspace.readFile(path).pipe(
+                    concatMap((content) =>
+                      this.objectStore
+                        .write("blob", content)
+                        .pipe(map((blob) => ({ blob, content }))),
+                    ),
+                    map(({ blob, content }) =>
+                      currentIndex.add(createIndexEntry(path, blob.oid, content)),
+                    ),
                   ),
                 ),
               ),
-            ),
-          of(index),
-        ),
-      ),
-      concatMap((next) => this.indexStore.write(next)),
-      map(() => ({ added: paths })),
+            of(index),
+          )
+          .pipe(
+            concatMap((next) => this.indexStore.write(next)),
+            map(() => ({ added: allowedPaths })),
+          );
+      }),
     );
   }
 
