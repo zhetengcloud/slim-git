@@ -9,7 +9,6 @@ import type {
   DeleteTagResult,
   DestroyResult,
   Diff,
-  FileDiff,
   IndexEntry,
   LogOptions,
   MergeResult,
@@ -25,7 +24,6 @@ import { ConflictError, NotFoundError, UnsupportedError } from "@slim-git/types"
 import type { StorageBackend } from "./backend.js";
 import { CommitBuilder } from "./commit-builder.js";
 import type { Config } from "./config.js";
-import { unifiedDiff } from "./diff.js";
 import { parseCommit$ } from "./commit-parser.js";
 import { DefaultHash, type HashAlgorithm } from "./hash.js";
 import { Index } from "./index-model.js";
@@ -33,22 +31,28 @@ import type { IndexStore } from "./index-store.js";
 import { ObjectStore } from "./object-store.js";
 import type { RefStore } from "./ref-store.js";
 import { TreeBuilder } from "./tree-builder.js";
+import type { TreeEntryMap } from "./tree-utils.js";
+import { findInTree$, flattenTree$ } from "./tree-utils.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
+import {
+  diffHeadRef,
+  diffIndexHead,
+  diffWorktreeIndex,
+} from "./repository-diff.js";
+import { fastForwardMerge } from "./repository-merge.js";
+import { addRemote, listRemotes, removeRemote } from "./repository-remotes.js";
 import {
   combineLatest,
   concatMap,
   defaultIfEmpty,
   distinct,
   expand,
-  filter,
-  first,
   forkJoin,
   from,
   map,
   of,
   type Observable,
   throwError,
-  toArray,
 } from "rxjs";
 
 /** Options used when initializing or opening a repository. */
@@ -110,101 +114,6 @@ const createIndexEntry = (path: string, oid: Oid, content: Uint8Array): IndexEnt
     skipWorktree: false,
     intentToAdd: false,
   };
-};
-
-/** Internal representation of a parsed tree entry used for HEAD comparisons. */
-interface TreeEntryMap {
-  readonly oid: Oid;
-  readonly mode: number;
-}
-
-/**
- * Parses the raw bytes of a Git tree object into a map of name → entry.
- * Tree format: `<mode> <name>\0<20-byte oid>` repeated for each entry.
- */
-const parseTreeEntries = (content: Uint8Array): Map<string, TreeEntryMap> => {
-  const entries = new Map<string, TreeEntryMap>();
-  let position = 0;
-
-  while (position < content.length) {
-    const spaceIndex = content.indexOf(0x20, position);
-    const nullIndex = content.indexOf(0x00, spaceIndex + 1);
-    if (spaceIndex === -1 || nullIndex === -1) break;
-
-    const modeText = new TextDecoder().decode(content.slice(position, spaceIndex));
-    const mode = Number.parseInt(modeText, 8);
-    const name = new TextDecoder().decode(content.slice(spaceIndex + 1, nullIndex));
-    const oidStart = nullIndex + 1;
-    const oidEnd = oidStart + 20;
-    const oidBytes = content.slice(oidStart, oidEnd);
-    const oid = Array.from(oidBytes)
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("") as Oid;
-
-    entries.set(name, { oid, mode });
-    position = oidEnd;
-  }
-
-  return entries;
-};
-
-/**
- * Recursively walks a tree to find the entry at the given path segments.
- * Returns undefined if any segment is missing.
- */
-const findInTree$ = (
-  store: ObjectStore,
-  treeOid: Oid,
-  segments: readonly string[],
-): Observable<TreeEntryMap | undefined> => {
-  if (segments.length === 0) {
-    return of(undefined);
-  }
-
-  return store.read(treeOid).pipe(
-    map((tree) => parseTreeEntries(tree.content)),
-    concatMap((entries) => {
-      const entry = entries.get(segments[0]!);
-      if (entry === undefined) {
-        return of(undefined);
-      }
-      if (segments.length === 1) {
-        return of(entry);
-      }
-      return findInTree$(store, entry.oid, segments.slice(1));
-    }),
-  );
-};
-
-/**
- * Recursively flattens a tree into a map of path → { oid, mode } for all blobs.
- * Directory paths are expanded; the returned map only contains files.
- */
-const flattenTree$ = (
-  store: ObjectStore,
-  treeOid: Oid,
-  prefix = "",
-): Observable<Map<string, TreeEntryMap>> => {
-  return store.read(treeOid).pipe(
-    map((tree) => parseTreeEntries(tree.content)),
-    concatMap((entries) => {
-      const childTasks = Array.from(entries).map(([name, entry]) => {
-        const path = prefix ? `${prefix}/${name}` : name;
-        if (entry.mode === 0o040000) {
-          return flattenTree$(store, entry.oid, path).pipe(
-            map((childEntries) => Array.from(childEntries) as [string, TreeEntryMap][]),
-          );
-        }
-        return of([[path, entry]] as [string, TreeEntryMap][]);
-      });
-
-      return childTasks.length === 0
-        ? of(new Map<string, TreeEntryMap>())
-        : forkJoin(childTasks).pipe(
-            map((groups) => new Map(groups.flat())),
-          );
-    }),
-  );
 };
 
 /**
@@ -323,7 +232,7 @@ export class Repository {
   }
 
   /** Reads a commit object and returns the oid of its tree. */
-  private readCommitTree$(oid: Oid): Observable<Oid> {
+  readCommitTree$(oid: Oid): Observable<Oid> {
     return this.objectStore.read(oid).pipe(
       concatMap((commit) => parseCommit$(commit)),
       map((info) => info.tree),
@@ -563,7 +472,7 @@ export class Repository {
    * Handles symbolic refs of the form `ref: refs/heads/main` and falls back to
    * `refs/heads/<name>` and `refs/tags/<name>` for short names.
    */
-  private resolveRef(name: string): Observable<Oid | undefined> {
+  resolveRef(name: string): Observable<Oid | undefined> {
     if (looksLikeOid(name)) {
       return of(name as Oid);
     }
@@ -712,7 +621,7 @@ export class Repository {
   }
 
   /** Removes workspace files not present in the target tree and writes the tree files. */
-  private applyTreeToWorkspace$(
+  applyTreeToWorkspace$(
     treeEntries: Map<string, TreeEntryMap>,
   ): Observable<Map<string, TreeEntryMap>> {
     return this.workspace.listFiles().pipe(
@@ -739,7 +648,7 @@ export class Repository {
   }
 
   /** Builds an index from a flattened tree. */
-  private buildIndexFromTree$(treeEntries: Map<string, TreeEntryMap>): Observable<Index> {
+  buildIndexFromTree$(treeEntries: Map<string, TreeEntryMap>): Observable<Index> {
     return Array.from(treeEntries).reduce<Observable<Index>>(
       (index$, [path, entry]) =>
         index$.pipe(
@@ -800,114 +709,26 @@ export class Repository {
 
   /** Adds a remote repository. */
   addRemote(name: string, url: string): Observable<Remote> {
-    return this.config
-      .set("remote", `${name}.url`, url)
-      .pipe(map(() => ({ name, url })));
+    return addRemote(this.config, name, url);
   }
 
   /** Removes a remote repository and its configuration. */
   removeRemote(name: string): Observable<void> {
-    return this.config.list("remote").pipe(
-      concatMap((entries) =>
-        forkJoin(
-          entries
-            .filter(([key]) => key.startsWith(`${name}.`))
-            .map(([key]) => this.config.remove("remote", key)),
-        ).pipe(defaultIfEmpty([])),
-      ),
-      map(() => undefined),
-    );
+    return removeRemote(this.config, name);
   }
 
   /** Lists all configured remotes sorted by name. */
   listRemotes(): Observable<Remote[]> {
-    return this.config.list("remote").pipe(
-      map((entries) => {
-        const urls = new Map<string, string>();
-        for (const [key, value] of entries) {
-          const dotIndex = key.indexOf(".");
-          if (dotIndex === -1) continue;
-          const name = key.slice(0, dotIndex);
-          const property = key.slice(dotIndex + 1);
-          if (property === "url") {
-            urls.set(name, value);
-          }
-        }
-        return Array.from(urls.entries())
-          .map(([name, url]) => ({ name, url }))
-          .sort((a, b) => a.name.localeCompare(b.name));
-      }),
-    );
+    return listRemotes(this.config);
   }
 
   /** Performs a fast-forward merge of the current branch to `target`. */
   fastForwardMerge(target: string): Observable<MergeResult> {
-    return combineLatest([this.refs.read("HEAD"), this.resolveRef(target)]).pipe(
-      concatMap(([headValue, targetOid]): Observable<MergeResult> => {
-        if (headValue === undefined) {
-          return throwError(() => new NotFoundError("HEAD")) as Observable<MergeResult>;
-        }
-        if (targetOid === undefined) {
-          return throwError(() => new NotFoundError(target)) as Observable<MergeResult>;
-        }
-
-        const headRef = headValue;
-        const newOid = targetOid;
-
-        const headOid$ = (headRef.startsWith("ref: ")
-          ? this.resolveRef(headRef.slice("ref: ".length))
-          : of(headRef)) as Observable<string | undefined>;
-
-        return headOid$.pipe(
-          concatMap((headOid): Observable<MergeResult> => {
-            if (headOid === undefined) {
-              return throwError(() => new NotFoundError(headRef)) as Observable<MergeResult>;
-            }
-            const currentOid = headOid;
-            if (currentOid === newOid) {
-              return of({ merged: true as const, commitOid: newOid as Oid });
-            }
-            return this.isAncestor$(currentOid as string, newOid as string).pipe(
-              concatMap((isAncestor): Observable<MergeResult> => {
-                if (!isAncestor) {
-                  return throwError(
-                    () => new UnsupportedError("Cannot fast-forward: branches have diverged"),
-                  ) as Observable<MergeResult>;
-                }
-                return this.applyCommit$(newOid as Oid).pipe(
-                  concatMap((): Observable<MergeResult> => {
-                    const headUpdate$ = headRef.startsWith("ref: ")
-                      ? this.refs.write(headRef.slice("ref: ".length), newOid)
-                      : this.refs.write("HEAD", newOid);
-                    return headUpdate$.pipe(
-                      map(() => ({ merged: true as const, commitOid: newOid as Oid })),
-                    );
-                  }),
-                );
-              }),
-            );
-          }),
-        );
-      }),
-    );
-  }
-
-  /** Checks whether `ancestor` is an ancestor of `descendant` (or the same commit). */
-  private isAncestor$(ancestor: string, descendant: string): Observable<boolean> {
-    if (ancestor === descendant) {
-      return of(true);
-    }
-
-    return this.log({ ref: descendant as Oid }).pipe(
-      map((commit) => commit.oid === ancestor),
-      filter((found) => found),
-      defaultIfEmpty(false),
-      first(),
-    );
+    return fastForwardMerge(this, target);
   }
 
   /** Updates the workspace and index to match a commit's tree without moving HEAD. */
-  private applyCommit$(commitOid: Oid): Observable<void> {
+  applyCommit$(commitOid: Oid): Observable<void> {
     return this.readCommitTree$(commitOid).pipe(
       concatMap((treeOid) => flattenTree$(this.objectStore, treeOid)),
       concatMap((treeEntries) => this.applyTreeToWorkspace$(treeEntries)),
@@ -933,120 +754,16 @@ export class Repository {
 
   /** Computes a diff between the index and the working tree. */
   diffWorktreeIndex(): Observable<Diff> {
-    return combineLatest([this.resolveTreeMap$("index"), this.resolveTreeMap$("worktree")]).pipe(
-      concatMap(([index, worktree]) => this.diffTreeMaps$(index, worktree)),
-      toArray(),
-      map((files) => ({ files })),
-    );
+    return diffWorktreeIndex(this);
   }
 
   /** Computes a diff between HEAD and the index. */
   diffIndexHead(): Observable<Diff> {
-    return combineLatest([this.resolveTreeMap$("head"), this.resolveTreeMap$("index")]).pipe(
-      concatMap(([head, index]) => this.diffTreeMaps$(head, index)),
-      toArray(),
-      map((files) => ({ files })),
-    );
+    return diffIndexHead(this);
   }
 
   /** Computes a diff between the given ref, branch, or oid and HEAD. */
   diffHeadRef(ref: string): Observable<Diff> {
-    return combineLatest([this.resolveTreeMap$(ref), this.resolveTreeMap$("head")]).pipe(
-      concatMap(([other, head]) => this.diffTreeMaps$(other, head)),
-      toArray(),
-      map((files) => ({ files })),
-    );
-  }
-
-  /**
-   * Resolves a tree source to a flattened map of path → { oid, mode }.
-   * Sources can be "worktree", "index", "head", or any ref/branch/oid string.
-   */
-  private resolveTreeMap$(
-    source: "worktree" | "index" | "head" | string,
-  ): Observable<Map<string, TreeEntryMap>> {
-    if (source === "worktree") {
-      return this.flattenWorktree$();
-    }
-
-    if (source === "index") {
-      return this.indexStore.read().pipe(map((index) => this.indexToTreeMap(index)));
-    }
-
-    const oid$ = source === "head" ? this.resolveRef("HEAD") : this.resolveRef(source);
-    return oid$.pipe(
-      concatMap((oid) => {
-        if (oid === undefined) {
-          return throwError(() => new NotFoundError(source));
-        }
-        return this.readCommitTree$(oid).pipe(
-          concatMap((treeOid) => flattenTree$(this.objectStore, treeOid)),
-        );
-      }),
-    );
-  }
-
-  /** Builds a flattened map from the current workspace files. */
-  private flattenWorktree$(): Observable<Map<string, TreeEntryMap>> {
-    return this.workspace.listFiles().pipe(
-      concatMap((files) =>
-        forkJoin(files.map((path) => this.hashWorktreeFile$(path))).pipe(defaultIfEmpty([])),
-      ),
-      map((entries) => new Map(entries)),
-    );
-  }
-
-  /** Reads a workspace file and persists it as a blob so it has an oid. */
-  private hashWorktreeFile$(path: string): Observable<[string, TreeEntryMap]> {
-    return this.workspace.readFile(path).pipe(
-      concatMap((content) => this.objectStore.write("blob", content)),
-      map((blob) => [path, { oid: blob.oid, mode: DefaultFileMode }]),
-    );
-  }
-
-  /** Converts an index into a flattened path → { oid, mode } map. */
-  private indexToTreeMap(index: Index): Map<string, TreeEntryMap> {
-    return new Map(
-      index.toArray().map((entry) => [entry.path, { oid: entry.oid, mode: entry.mode }]),
-    );
-  }
-
-  /** Compares an old tree map to a new tree map and emits one FileDiff at a time. */
-  private diffTreeMaps$(
-    oldMap: Map<string, TreeEntryMap>,
-    newMap: Map<string, TreeEntryMap>,
-  ): Observable<FileDiff> {
-    const paths = Array.from(new Set([...oldMap.keys(), ...newMap.keys()])).sort();
-
-    return from(paths).pipe(
-      concatMap((path) => {
-        const oldEntry = oldMap.get(path);
-        const newEntry = newMap.get(path);
-
-        if (oldEntry === undefined) {
-          return of({ path, status: "added" as const, hunks: [] });
-        }
-
-        if (newEntry === undefined) {
-          return of({ path, status: "deleted" as const, hunks: [] });
-        }
-
-        if (oldEntry.oid === newEntry.oid) {
-          return of({ path, status: "unchanged" as const, hunks: [] });
-        }
-
-        return combineLatest([
-          this.objectStore.read(oldEntry.oid),
-          this.objectStore.read(newEntry.oid),
-        ]).pipe(
-          map(([oldObject, newObject]) => ({
-            path,
-            status: "modified" as const,
-            hunks: unifiedDiff(oldObject.content, newObject.content),
-          })),
-        );
-      }),
-      filter((file) => file.status !== "unchanged"),
-    );
+    return diffHeadRef(this, ref);
   }
 }
