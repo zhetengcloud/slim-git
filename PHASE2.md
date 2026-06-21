@@ -76,7 +76,7 @@ Add to `Repository`:
 
 ## 8. Tests
 
-Add `packages/core/test/phase2.test.ts` covering:
+Add focused test files covering history, branches, checkout, and tags:
 
 - `log()` walks commits from HEAD.
 - `log({ ref: branchName })` walks from a branch.
