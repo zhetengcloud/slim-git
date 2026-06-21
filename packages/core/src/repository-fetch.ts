@@ -4,11 +4,16 @@ import {
   combineLatest,
   concatMap,
   defaultIfEmpty,
+  distinct,
+  expand,
+  filter,
   forkJoin,
+  from,
   map,
   Observable,
   of,
   throwError,
+  toArray,
 } from "rxjs";
 import type { Repository } from "./repository.js";
 import { parseTreeEntries } from "./tree-utils.js";
@@ -149,43 +154,42 @@ const updateRemoteTrackingRefs$ = (
     map(() => undefined),
   );
 
-/** Collects all objects reachable from a commit oid (commit, tree, blobs). */
-const collectReachableObjects$ = (repo: Repository, oid: Oid): Observable<readonly GitObject[]> => {
-  const collected = new Map<Oid, GitObject>();
+/** Returns the oids referenced by a Git object (parents/tree for commits, entries for trees). */
+const childOids = (object: GitObject): readonly Oid[] => {
+  if (object.type === "commit") {
+    const text = new TextDecoder().decode(object.content);
+    const parents = [...text.matchAll(/^parent ([0-9a-f]{40})$/gim)].map((match) => match[1]! as Oid);
+    const tree = text.match(/^tree ([0-9a-f]{40})$/im)?.[1] as Oid | undefined;
+    return tree === undefined ? parents : [...parents, tree];
+  }
 
-  const visit = async (objectOid: Oid): Promise<void> => {
-    if (collected.has(objectOid)) return;
+  if (object.type === "tree") {
+    return Array.from(parseTreeEntries(object.content).values()).map((entry) => entry.oid);
+  }
 
-    const object = await new Promise<GitObject>((resolve, reject) => {
-      repo.objectStore.read(objectOid).subscribe({ next: resolve, error: reject });
-    });
-    collected.set(objectOid, object);
-
-    if (object.type === "commit") {
-      const text = new TextDecoder().decode(object.content);
-      const parentMatches = text.match(/^parent ([0-9a-f]{40})$/gim);
-      if (parentMatches !== null) {
-        for (const match of parentMatches) {
-          await visit(match.split(" ")[1]! as Oid);
-        }
-      }
-      const treeMatch = text.match(/^tree ([0-9a-f]{40})$/im);
-      if (treeMatch !== null) {
-        await visit(treeMatch[1]! as Oid);
-      }
-    } else if (object.type === "tree") {
-      for (const entry of parseTreeEntries(object.content).values()) {
-        await visit(entry.oid);
-      }
-    }
-  };
-
-  return new Observable((subscriber) => {
-    visit(oid)
-      .then(() => {
-        subscriber.next(Array.from(collected.values()));
-        subscriber.complete();
-      })
-      .catch((error) => subscriber.error(error));
-  });
+  return [];
 };
+
+/**
+ * Collects all objects reachable from a commit oid (commit, tree, blobs).
+ *
+ * Objects whose oids are present in `exclude` are skipped. This is useful for
+ * push, where objects already known to the remote can be omitted from the
+ * packfile.
+ */
+const collectReachableObjects$ = (
+  repo: Repository,
+  oid: Oid,
+  exclude: ReadonlySet<Oid> = new Set(),
+): Observable<readonly GitObject[]> =>
+  of(oid).pipe(
+    filter((objectOid) => !exclude.has(objectOid)),
+    expand((objectOid) =>
+      repo.objectStore.read(objectOid).pipe(map((object) => childOids(object)), concatMap(from)),
+    ),
+    distinct(),
+    filter((objectOid) => !exclude.has(objectOid)),
+    concatMap((objectOid) => repo.objectStore.read(objectOid)),
+    toArray(),
+    map((objects) => objects as readonly GitObject[]),
+  );
