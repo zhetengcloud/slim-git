@@ -17,6 +17,7 @@
       "@slim-git/types": ["./packages/types/src/index.ts"],
       "@slim-git/core": ["./packages/core/src/index.ts"],
       "@slim-git/memory": ["./packages/memory/src/index.ts"],
+      "@slim-git/http": ["./packages/http/src/index.ts"],
       "slim-git": ["./packages/slim-git/src/index.ts"]
     }
   },
