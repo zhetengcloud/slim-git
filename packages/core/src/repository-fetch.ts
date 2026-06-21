@@ -62,7 +62,7 @@ export const push = (
 ): Observable<PushResult> =>
   resolveTargetBranch$(repo, options.ref).pipe(
     concatMap((branchName) =>
-      combineLatest([repo.resolveRef(`refs/heads/${branchName}`), transport.discoverRefs()]).pipe(
+      combineLatest([repo.resolveRef(`refs/heads/${branchName}`), transport.discoverReceiveRefs()]).pipe(
         concatMap(([localOid, remoteRefs]) => {
           if (localOid === undefined) {
             return throwError(() => new NotFoundError(`refs/heads/${branchName}`));

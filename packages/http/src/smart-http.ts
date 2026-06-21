@@ -59,6 +59,16 @@ export class SmartHttpTransport implements Transport {
   }
 
   /**
+   * Discovers refs advertised by the remote for `git-receive-pack`.
+   *
+   * Performs a `GET /info/refs?service=git-receive-pack` request and parses the
+   * pkt-line ref advertisement.
+   */
+  discoverReceiveRefs(): Observable<readonly DiscoveredRef[]> {
+    return this.discoverRefsForService("git-receive-pack").pipe(map((discovery) => discovery.refs));
+  }
+
+  /**
    * Fetches objects reachable from `wants` that are not in `haves`.
    *
    * Sends a `POST /git-upload-pack` request advertising `side-band-64k` so the
@@ -262,7 +272,7 @@ const parseFetchResponse = (data: Uint8Array): Uint8Array => {
     const payload = frame.slice(1);
 
     if (channel === 0x01) {
-      const text = new TextDecoder().decode(payload);
+      const text = new TextDecoder().decode(payload).trimEnd();
       if (text === "NAK" || text.startsWith("ACK ")) {
         continue;
       }
@@ -270,7 +280,7 @@ const parseFetchResponse = (data: Uint8Array): Uint8Array => {
     } else if (channel === 0x02) {
       // Progress message; ignore for now. Could be surfaced via a logger later.
     } else if (channel === 0x03) {
-      throw new Error(`Remote error: ${new TextDecoder().decode(payload)}`);
+      throw new Error(`Remote error: ${new TextDecoder().decode(payload).trimEnd()}`);
     } else {
       throw new Error(`Unknown side-band channel: ${channel}`);
     }
