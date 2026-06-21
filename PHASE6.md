@@ -22,7 +22,7 @@ Audit every public export and add TSDoc comments where missing:
 - Memory backends and `MemoryTransport`.
 - HTTP transport public exports.
 
-Follow the project convention: explain *why* and *what*, keep comments concise, and document all parameters and return types.
+Follow the project convention: explain _why_ and _what_, keep comments concise, and document all parameters and return types.
 
 ## 2. TypeScript type consistency
 
