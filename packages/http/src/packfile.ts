@@ -36,7 +36,9 @@ const encodeObjectBytes = (type: ObjectType, content: Uint8Array): Uint8Array =>
  *
  * Throws if the header is malformed or the size does not match the content.
  */
-const parseObjectBytes = (raw: Uint8Array): { readonly type: ObjectType; readonly content: Uint8Array } => {
+const parseObjectBytes = (
+  raw: Uint8Array,
+): { readonly type: ObjectType; readonly content: Uint8Array } => {
   const spaceIndex = raw.indexOf(0x20);
   const nullIndex = raw.indexOf(0x00, spaceIndex + 1);
 
@@ -129,7 +131,10 @@ const decodeTypeSize = (
  * Offsets are relative to the current object and encoded with MSB continuation.
  * One is added before each left shift to avoid ambiguous encodings.
  */
-const decodeOffset = (buffer: Uint8Array, offset: number): { readonly value: number; readonly bytesRead: number } => {
+const decodeOffset = (
+  buffer: Uint8Array,
+  offset: number,
+): { readonly value: number; readonly bytesRead: number } => {
   let byte = buffer[offset]!;
   let value = byte & 0x7f;
   let bytesRead = 1;
@@ -149,7 +154,9 @@ const decodeOffset = (buffer: Uint8Array, offset: number): { readonly value: num
  * Returns the decompressed bytes and the number of compressed input bytes
  * consumed. This lets the packfile parser step from one object to the next.
  */
-const inflateObject = (input: Uint8Array): Promise<{ readonly data: Uint8Array; readonly consumed: number }> =>
+const inflateObject = (
+  input: Uint8Array,
+): Promise<{ readonly data: Uint8Array; readonly consumed: number }> =>
   new Promise((resolve, reject) => {
     const inflate = new Inflate();
     const chunks: Uint8Array[] = [];
@@ -159,15 +166,12 @@ const inflateObject = (input: Uint8Array): Promise<{ readonly data: Uint8Array; 
     });
 
     inflate.on("end", () => {
-      const data = chunks.reduce(
-        (acc, chunk) => {
-          const result = new Uint8Array(acc.length + chunk.length);
-          result.set(acc);
-          result.set(chunk, acc.length);
-          return result;
-        },
-        new Uint8Array(0),
-      );
+      const data = chunks.reduce((acc, chunk) => {
+        const result = new Uint8Array(acc.length + chunk.length);
+        result.set(acc);
+        result.set(chunk, acc.length);
+        return result;
+      }, new Uint8Array(0));
       resolve({ data, consumed: inflate.bytesWritten });
     });
 
@@ -245,9 +249,7 @@ export const applyDelta = (delta: Uint8Array, base: Uint8Array): Uint8Array => {
       if ((instruction & 0x40) !== 0) size |= delta[position + offsetBytes + 2]! << 16;
 
       const sizeBytes =
-        ((instruction & 0x10) >> 4) +
-        ((instruction & 0x20) >> 5) +
-        ((instruction & 0x40) >> 6);
+        ((instruction & 0x10) >> 4) + ((instruction & 0x20) >> 5) + ((instruction & 0x40) >> 6);
 
       position += offsetBytes + sizeBytes;
 
@@ -296,22 +298,22 @@ export const buildPackfile = (objects: readonly GitObject[]): Uint8Array => {
     dataChunks.push(header, new Uint8Array(compressed));
   }
 
-  const data = dataChunks.reduce(
-    (acc, chunk) => {
-      const result = new Uint8Array(acc.length + chunk.length);
-      result.set(acc);
-      result.set(chunk, acc.length);
-      return result;
-    },
-    new Uint8Array(0),
-  );
+  const data = dataChunks.reduce((acc, chunk) => {
+    const result = new Uint8Array(acc.length + chunk.length);
+    result.set(acc);
+    result.set(chunk, acc.length);
+    return result;
+  }, new Uint8Array(0));
 
   const header = new Uint8Array(PackMagic.length + 8);
   header.set(PackMagic);
   header.set(writeUInt32(PackVersion), PackMagic.length);
   header.set(writeUInt32(entries.length), PackMagic.length + 4);
 
-  const checksum = createHash("sha1").update(Buffer.from(header)).update(Buffer.from(data)).digest();
+  const checksum = createHash("sha1")
+    .update(Buffer.from(header))
+    .update(Buffer.from(data))
+    .digest();
 
   return concatBytes(concatBytes(header, data), new Uint8Array(checksum));
 };
@@ -350,7 +352,9 @@ export const parsePackfile = async (
   const checksumOffset = buffer.length - ChecksumLength;
 
   const expectedChecksum = buffer.slice(checksumOffset);
-  const actualChecksum = createHash("sha1").update(Buffer.from(buffer.slice(0, checksumOffset))).digest();
+  const actualChecksum = createHash("sha1")
+    .update(Buffer.from(buffer.slice(0, checksumOffset)))
+    .digest();
   for (let index = 0; index < ChecksumLength; index++) {
     if (expectedChecksum[index] !== actualChecksum[index]) {
       throw new Error("Packfile checksum mismatch");

@@ -92,7 +92,9 @@ export class SmartHttpTransport implements Transport {
     ).pipe(
       concatMap((response) => {
         if (!response.ok) {
-          return throwError(() => new Error(`Fetch failed: ${response.status} ${response.statusText}`));
+          return throwError(
+            () => new Error(`Fetch failed: ${response.status} ${response.statusText}`),
+          );
         }
         return from(response.arrayBuffer());
       }),
@@ -125,7 +127,9 @@ export class SmartHttpTransport implements Transport {
     ).pipe(
       concatMap((response) => {
         if (!response.ok) {
-          return throwError(() => new Error(`Push failed: ${response.status} ${response.statusText}`));
+          return throwError(
+            () => new Error(`Push failed: ${response.status} ${response.statusText}`),
+          );
         }
         return from(response.arrayBuffer());
       }),
@@ -286,15 +290,12 @@ const parseFetchResponse = (data: Uint8Array): Uint8Array => {
     }
   }
 
-  return packChunks.reduce(
-    (acc, chunk) => {
-      const result = new Uint8Array(acc.length + chunk.length);
-      result.set(acc);
-      result.set(chunk, acc.length);
-      return result;
-    },
-    new Uint8Array(0),
-  );
+  return packChunks.reduce((acc, chunk) => {
+    const result = new Uint8Array(acc.length + chunk.length);
+    result.set(acc);
+    result.set(chunk, acc.length);
+    return result;
+  }, new Uint8Array(0));
 };
 
 /**
@@ -304,10 +305,7 @@ const parseFetchResponse = (data: Uint8Array): Uint8Array => {
  * `ok <ref>` or `ng <ref> <msg>`. If unpacking failed, every ref is marked as
  * rejected.
  */
-const parsePushReport = (
-  data: Uint8Array,
-  commands: readonly PushCommand[],
-): PushReport => {
+const parsePushReport = (data: Uint8Array, commands: readonly PushCommand[]): PushReport => {
   const { lines } = decodePktLines(data);
   let unpackOk = false;
   let unpackMessage: string | undefined;

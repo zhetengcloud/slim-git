@@ -43,12 +43,7 @@ describe("buildPackfile / parsePackfile", () => {
 describe("applyDelta", () => {
   test("copies bytes from the base", () => {
     const base = new TextEncoder().encode("commit 5\0hello");
-    const delta = new Uint8Array([
-      base.length,
-      base.length,
-      0x90,
-      base.length,
-    ]);
+    const delta = new Uint8Array([base.length, base.length, 0x90, base.length]);
 
     const result = applyDelta(delta, base);
     expect(result).toEqual(base);

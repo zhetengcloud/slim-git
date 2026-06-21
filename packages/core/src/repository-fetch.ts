@@ -67,7 +67,10 @@ export const push = (
 ): Observable<PushResult> =>
   resolveTargetBranch$(repo, options.ref).pipe(
     concatMap((branchName) =>
-      combineLatest([repo.resolveRef(`refs/heads/${branchName}`), transport.discoverReceiveRefs()]).pipe(
+      combineLatest([
+        repo.resolveRef(`refs/heads/${branchName}`),
+        transport.discoverReceiveRefs(),
+      ]).pipe(
         concatMap(([localOid, remoteRefs]) => {
           if (localOid === undefined) {
             return throwError(() => new NotFoundError(`refs/heads/${branchName}`));
@@ -158,7 +161,9 @@ const updateRemoteTrackingRefs$ = (
 const childOids = (object: GitObject): readonly Oid[] => {
   if (object.type === "commit") {
     const text = new TextDecoder().decode(object.content);
-    const parents = [...text.matchAll(/^parent ([0-9a-f]{40})$/gim)].map((match) => match[1]! as Oid);
+    const parents = [...text.matchAll(/^parent ([0-9a-f]{40})$/gim)].map(
+      (match) => match[1]! as Oid,
+    );
     const tree = text.match(/^tree ([0-9a-f]{40})$/im)?.[1] as Oid | undefined;
     return tree === undefined ? parents : [...parents, tree];
   }
@@ -185,7 +190,10 @@ const collectReachableObjects$ = (
   of(oid).pipe(
     filter((objectOid) => !exclude.has(objectOid)),
     expand((objectOid) =>
-      repo.objectStore.read(objectOid).pipe(map((object) => childOids(object)), concatMap(from)),
+      repo.objectStore.read(objectOid).pipe(
+        map((object) => childOids(object)),
+        concatMap(from),
+      ),
     ),
     distinct(),
     filter((objectOid) => !exclude.has(objectOid)),

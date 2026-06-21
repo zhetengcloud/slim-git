@@ -28,7 +28,12 @@ const createRepo = async (backend = new MemoryBackend()): Promise<Repository> =>
     }),
   );
 
-const commitFile = async (repo: Repository, path: string, content: string, message: string): Promise<Oid> => {
+const commitFile = async (
+  repo: Repository,
+  path: string,
+  content: string,
+  message: string,
+): Promise<Oid> => {
   await lastValueFrom(repo.workspace.writeFile(path, new TextEncoder().encode(content)));
   await lastValueFrom(repo.add([path]));
   return lastValueFrom(repo.commit({ message, author: person }));
@@ -217,9 +222,7 @@ describe("SmartHttpTransport integration", () => {
       await lastValueFrom(local.checkout("main"));
 
       const transport = new SmartHttpTransport(`http://localhost:${server.port}`);
-      const result = await lastValueFrom(
-        local.push("origin", transport, { ref: "main" }),
-      );
+      const result = await lastValueFrom(local.push("origin", transport, { ref: "main" }));
 
       expect(result.pushed).toHaveLength(1);
       expect(result.pushed[0]?.accepted).toBe(true);
