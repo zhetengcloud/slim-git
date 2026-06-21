@@ -4,4 +4,4 @@
  * Provides Node.js filesystem-backed implementations of slim-git's storage
  * abstractions: object database, refs, index, workspace, and config.
  */
-export {};
+export * from "./node-workspace.js";
