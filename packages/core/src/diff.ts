@@ -1,7 +1,7 @@
 import type { DiffLine, Hunk } from "@slim-git/types";
 
-/** Internal edit operation produced by the Myers algorithm. */
-interface Edit {
+/** Edit operation produced by the Myers diff algorithm. */
+export interface Edit {
   readonly type: "equal" | "insert" | "delete";
   readonly oldIndex: number;
   readonly newIndex: number;
