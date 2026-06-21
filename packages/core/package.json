@@ -7,7 +7,8 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@slim-git/types": "workspace:*"
+    "@slim-git/types": "workspace:*",
+    "rxjs": "^7.8.1"
   },
   "devDependencies": {
     "@slim-git/memory": "workspace:*"

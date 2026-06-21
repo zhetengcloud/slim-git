@@ -20,5 +20,10 @@
       "slim-git": ["./packages/slim-git/src/index.ts"]
     }
   },
-  "include": ["packages/*/src/**/*.ts", "packages/@slim-git/*/src/**/*.ts"]
+  "include": [
+    "packages/*/src/**/*.ts",
+    "packages/*/test/**/*.ts",
+    "packages/@slim-git/*/src/**/*.ts",
+    "packages/@slim-git/*/test/**/*.ts"
+  ]
 }

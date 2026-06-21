@@ -1,6 +1,6 @@
 import type { Oid } from "@slim-git/types";
 import { describe, expect, test } from "bun:test";
-import { Sha1Hash, Sha256Hash } from "./hash.js";
+import { Sha1Hash, Sha256Hash } from "@slim-git/core";
 
 describe("Sha1Hash", () => {
   test("matches canonical Git blob hash", () => {

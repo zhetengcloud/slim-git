@@ -9,7 +9,8 @@
   "dependencies": {
     "@slim-git/core": "workspace:*",
     "@slim-git/memory": "workspace:*",
-    "@slim-git/types": "workspace:*"
+    "@slim-git/types": "workspace:*",
+    "rxjs": "^7.8.1"
   },
   "peerDependencies": {
     "typescript": "^5"

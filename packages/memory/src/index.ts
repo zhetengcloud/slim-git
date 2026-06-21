@@ -9,7 +9,15 @@ import type {
   StorageBackend,
   WorkspaceBackend,
 } from "@slim-git/core";
+import type {
+  IndexWriteResult,
+  RefDeleteResult,
+  RefWriteResult,
+  WorkspaceRemoveResult,
+  WorkspaceWriteResult,
+} from "@slim-git/types";
 import { Index, NotFoundError, Repository as RepositoryImpl } from "@slim-git/core";
+import { of, throwError, type Observable } from "rxjs";
 
 /**
  * In-memory implementation of `StorageBackend`.
@@ -22,21 +30,21 @@ export class MemoryBackend implements StorageBackend {
 
   private readonly objects = new Map<Oid, GitObject>();
 
-  async readObject(oid: Oid): Promise<GitObject> {
+  readObject(oid: Oid): Observable<GitObject> {
     const object = this.objects.get(oid);
     if (object === undefined) {
-      throw new NotFoundError(`object ${oid}`);
+      return throwError(() => new NotFoundError(`object ${oid}`));
     }
-    return object;
+    return of(object);
   }
 
-  async writeObject(object: GitObject): Promise<GitObject> {
+  writeObject(object: GitObject): Observable<GitObject> {
     this.objects.set(object.oid, object);
-    return object;
+    return of(object);
   }
 
-  async exists(oid: Oid): Promise<boolean> {
-    return this.objects.has(oid);
+  exists(oid: Oid): Observable<boolean> {
+    return of(this.objects.has(oid));
   }
 }
 
@@ -44,19 +52,27 @@ export class MemoryBackend implements StorageBackend {
 export class MemoryRefStore implements RefStore {
   private readonly refs = new Map<string, string>();
 
-  async read(ref: string): Promise<string | undefined> {
-    return this.refs.get(ref);
+  read(ref: string): Observable<string | undefined> {
+    return of(this.refs.get(ref));
   }
 
-  async write(ref: string, target: string): Promise<void> {
+  write(ref: string, target: string): Observable<RefWriteResult> {
     this.refs.set(ref, target);
+    return of({ ref, target });
   }
 
-  async list(prefix: string): Promise<Ref[]> {
-    return Array.from(this.refs.entries())
-      .filter(([name]) => name.startsWith(prefix))
-      .map(([name, target]) => ({ name, target }))
-      .sort((a, b) => a.name.localeCompare(b.name));
+  delete(ref: string): Observable<RefDeleteResult> {
+    this.refs.delete(ref);
+    return of({ ref });
+  }
+
+  list(prefix: string): Observable<Ref[]> {
+    return of(
+      Array.from(this.refs.entries())
+        .filter(([name]) => name.startsWith(prefix))
+        .map(([name, target]) => ({ name, target }))
+        .sort((a, b) => a.name.localeCompare(b.name)),
+    );
   }
 }
 
@@ -64,12 +80,13 @@ export class MemoryRefStore implements RefStore {
 export class MemoryIndexStore implements IndexStore {
   private index: Index = Index.empty();
 
-  async read(): Promise<Index> {
-    return this.index;
+  read(): Observable<Index> {
+    return of(this.index);
   }
 
-  async write(index: Index): Promise<void> {
+  write(index: Index): Observable<IndexWriteResult> {
     this.index = index;
+    return of({ entries: index.paths.length });
   }
 }
 
@@ -79,28 +96,30 @@ export class MemoryWorkspaceBackend implements WorkspaceBackend {
 
   private readonly files = new Map<string, Uint8Array>();
 
-  async readFile(path: string): Promise<Uint8Array> {
+  readFile(path: string): Observable<Uint8Array> {
     const content = this.files.get(path);
     if (content === undefined) {
-      throw new NotFoundError(`file ${path}`);
+      return throwError(() => new NotFoundError(`file ${path}`));
     }
-    return content;
+    return of(content);
   }
 
-  async writeFile(path: string, content: Uint8Array): Promise<void> {
+  writeFile(path: string, content: Uint8Array): Observable<WorkspaceWriteResult> {
     this.files.set(path, content);
+    return of({ path });
   }
 
-  async removeFile(path: string): Promise<void> {
+  removeFile(path: string): Observable<WorkspaceRemoveResult> {
     this.files.delete(path);
+    return of({ path });
   }
 
-  async listFiles(): Promise<string[]> {
-    return Array.from(this.files.keys()).sort();
+  listFiles(): Observable<string[]> {
+    return of(Array.from(this.files.keys()).sort());
   }
 
-  async exists(path: string): Promise<boolean> {
-    return this.files.has(path);
+  exists(path: string): Observable<boolean> {
+    return of(this.files.has(path));
   }
 }
 
@@ -117,7 +136,7 @@ export interface MemoryRepositoryOptions extends RepositoryOptions {
  */
 export const createMemoryRepository = (
   options: MemoryRepositoryOptions = {},
-): Promise<Repository> =>
+): Observable<Repository> =>
   RepositoryImpl.init(new MemoryBackend(), {
     ...options,
     refs: options.refs ?? new MemoryRefStore(),

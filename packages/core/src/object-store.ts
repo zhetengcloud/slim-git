@@ -1,4 +1,5 @@
 import type { GitObject, ObjectType, Oid } from "@slim-git/types";
+import { type Observable } from "rxjs";
 import type { StorageBackend } from "./backend.js";
 import type { HashAlgorithm } from "./hash.js";
 
@@ -24,18 +25,18 @@ export class ObjectStore {
   }
 
   /** Hashes the object and writes it to the backing store. */
-  async write(type: ObjectType, content: Uint8Array): Promise<GitObject> {
+  write(type: ObjectType, content: Uint8Array): Observable<GitObject> {
     const object = this.hashObject(type, content);
     return this.backend.writeObject(object);
   }
 
   /** Reads an object by oid from the backing store. */
-  async read(oid: Oid): Promise<GitObject> {
+  read(oid: Oid): Observable<GitObject> {
     return this.backend.readObject(oid);
   }
 
   /** Checks whether an object with the given oid exists in the store. */
-  async exists(oid: Oid): Promise<boolean> {
+  exists(oid: Oid): Observable<boolean> {
     return this.backend.exists(oid);
   }
 }

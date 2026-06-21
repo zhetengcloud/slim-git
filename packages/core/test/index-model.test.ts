@@ -1,6 +1,6 @@
 import type { IndexEntry, Oid } from "@slim-git/types";
 import { describe, expect, test } from "bun:test";
-import { Index } from "./index-model.js";
+import { Index } from "@slim-git/core";
 
 const entry = (path: string, oid: string): IndexEntry => ({
   path,

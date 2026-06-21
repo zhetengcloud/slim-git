@@ -1,4 +1,5 @@
 import type { GitObject, Oid } from "@slim-git/types";
+import type { Observable } from "rxjs";
 
 /**
  * Pluggable storage backend for the Git object database.
@@ -6,7 +7,7 @@ import type { GitObject, Oid } from "@slim-git/types";
  */
 export interface StorageBackend {
   readonly name: string;
-  readObject(oid: Oid): Promise<GitObject>;
-  writeObject(object: GitObject): Promise<GitObject>;
-  exists(oid: Oid): Promise<boolean>;
+  readObject(oid: Oid): Observable<GitObject>;
+  writeObject(object: GitObject): Observable<GitObject>;
+  exists(oid: Oid): Observable<boolean>;
 }

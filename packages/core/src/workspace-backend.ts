@@ -1,3 +1,6 @@
+import type { WorkspaceRemoveResult, WorkspaceWriteResult } from "@slim-git/types";
+import type { Observable } from "rxjs";
+
 /**
  * Pluggable abstraction over the repository working tree.
  *
@@ -6,9 +9,9 @@
  */
 export interface WorkspaceBackend {
   readonly name: string;
-  readFile(path: string): Promise<Uint8Array>;
-  writeFile(path: string, content: Uint8Array): Promise<void>;
-  removeFile(path: string): Promise<void>;
-  listFiles(): Promise<string[]>;
-  exists(path: string): Promise<boolean>;
+  readFile(path: string): Observable<Uint8Array>;
+  writeFile(path: string, content: Uint8Array): Observable<WorkspaceWriteResult>;
+  removeFile(path: string): Observable<WorkspaceRemoveResult>;
+  listFiles(): Observable<string[]>;
+  exists(path: string): Observable<boolean>;
 }

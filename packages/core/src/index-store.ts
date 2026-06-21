@@ -1,3 +1,5 @@
+import type { IndexWriteResult } from "@slim-git/types";
+import type { Observable } from "rxjs";
 import type { Index } from "./index-model.js";
 
 /**
@@ -5,6 +7,6 @@ import type { Index } from "./index-model.js";
  * Implementations decide how and where the index is serialized.
  */
 export interface IndexStore {
-  read(): Promise<Index>;
-  write(index: Index): Promise<void>;
+  read(): Observable<Index>;
+  write(index: Index): Observable<IndexWriteResult>;
 }

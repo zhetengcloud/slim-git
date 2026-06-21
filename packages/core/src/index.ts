@@ -7,6 +7,8 @@
 export * from "@slim-git/types";
 export * from "./backend.js";
 export * from "./commit-builder.js";
+export * from "./commit-parser.js";
+
 export * from "./hash.js";
 export * from "./index-model.js";
 export * from "./index-store.js";

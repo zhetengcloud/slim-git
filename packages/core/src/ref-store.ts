@@ -1,11 +1,13 @@
-import type { Ref } from "@slim-git/types";
+import type { Ref, RefDeleteResult, RefWriteResult } from "@slim-git/types";
+import type { Observable } from "rxjs";
 
 /**
  * Pluggable storage for Git refs.
  * Refs include HEAD, branches (`refs/heads/*`), tags (`refs/tags/*`), and remotes.
  */
 export interface RefStore {
-  read(ref: string): Promise<string | undefined>;
-  write(ref: string, target: string): Promise<void>;
-  list(prefix: string): Promise<Ref[]>;
+  read(ref: string): Observable<string | undefined>;
+  write(ref: string, target: string): Observable<RefWriteResult>;
+  delete(ref: string): Observable<RefDeleteResult>;
+  list(prefix: string): Observable<Ref[]>;
 }

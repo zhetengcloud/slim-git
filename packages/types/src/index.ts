@@ -67,11 +67,30 @@ export interface TreeEntry {
 
 /** Parsed contents of a Git commit object. */
 export interface CommitInfo {
+  readonly oid: Oid;
   readonly tree: Oid;
   readonly parents: readonly Oid[];
   readonly author: Person;
   readonly committer: Person;
   readonly message: string;
+}
+
+/** Options for `Repository.log()`. */
+export interface LogOptions {
+  /** Ref name or oid to start from. Defaults to HEAD. */
+  readonly ref?: string;
+}
+
+/** A branch (refs/heads/*). */
+export interface Branch {
+  readonly name: string;
+  readonly target: Oid;
+}
+
+/** A lightweight tag (refs/tags/*). */
+export interface Tag {
+  readonly name: string;
+  readonly target: Oid;
 }
 
 /** Result of comparing the workspace to the index and HEAD. */
@@ -109,4 +128,78 @@ export class ConflictError extends SlimGitError {
   constructor(what: string) {
     super(`Conflict: ${what}`);
   }
+}
+
+/** Result returned by ref write operations. */
+export interface RefWriteResult {
+  readonly ref: string;
+  readonly target: string;
+}
+
+/** Result returned by ref delete operations. */
+export interface RefDeleteResult {
+  readonly ref: string;
+}
+
+/** Result returned by index write operations. */
+export interface IndexWriteResult {
+  readonly entries: number;
+}
+
+/** Result returned by workspace file write operations. */
+export interface WorkspaceWriteResult {
+  readonly path: string;
+}
+
+/** Result returned by workspace file remove operations. */
+export interface WorkspaceRemoveResult {
+  readonly path: string;
+}
+
+/** Result of staging files. */
+export interface AddResult {
+  readonly added: readonly string[];
+}
+
+/** Result of removing files from workspace and index. */
+export interface RemoveResult {
+  readonly removed: readonly string[];
+}
+
+/** Result of restoring workspace files from the index. */
+export interface RestoreResult {
+  readonly restored: readonly string[];
+}
+
+/** Result of creating a branch. */
+export interface CreateBranchResult {
+  readonly name: string;
+  readonly target: Oid;
+}
+
+/** Result of deleting a branch. */
+export interface DeleteBranchResult {
+  readonly name: string;
+}
+
+/** Result of checking out a branch or commit. */
+export interface CheckoutResult {
+  readonly commitOid: Oid;
+  readonly branch?: string;
+}
+
+/** Result of creating a tag. */
+export interface CreateTagResult {
+  readonly name: string;
+  readonly target: Oid;
+}
+
+/** Result of deleting a tag. */
+export interface DeleteTagResult {
+  readonly name: string;
+}
+
+/** Result of releasing repository resources. */
+export interface DestroyResult {
+  readonly destroyed: true;
 }

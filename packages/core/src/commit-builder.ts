@@ -1,5 +1,7 @@
 import type { CommitInfo, Oid, Person } from "@slim-git/types";
 import type { ObjectStore } from "./object-store.js";
+import { map, Observable, of, throwError } from "rxjs";
+import { concatMap } from "rxjs/operators";
 
 /**
  * Formats a timezone offset in Git's `+HHMM` / `-HHMM` notation.
@@ -31,7 +33,7 @@ const formatPerson = (label: string, person: Person): string => {
  *
  * <message>
  */
-const buildCommitBytes = (info: CommitInfo): Uint8Array => {
+const buildCommitBytes = (info: Omit<CommitInfo, "oid">): Uint8Array => {
   const encoder = new TextEncoder();
   const lines: string[] = [
     `tree ${info.tree}`,
@@ -49,13 +51,15 @@ const buildCommitBytes = (info: CommitInfo): Uint8Array => {
  *
  * Example:
  * ```ts
- * const oid = await new CommitBuilder()
- *   .tree(treeOid)
- *   .parent(parentOid)
- *   .author(person)
- *   .committer(person)
- *   .message("hello")
- *   .build(objectStore);
+ * const oid = await lastValueFrom(
+ *   new CommitBuilder()
+ *     .tree(treeOid)
+ *     .parent(parentOid)
+ *     .author(person)
+ *     .committer(person)
+ *     .message("hello")
+ *     .build(objectStore)
+ * );
  * ```
  */
 export class CommitBuilder {
@@ -95,19 +99,23 @@ export class CommitBuilder {
     return this;
   }
 
-  /** Serializes the commit and writes it to the object store. */
-  async build(store: ObjectStore): Promise<Oid> {
+  /**
+   * Serializes the commit and writes it to the object store.
+   * Returns an `Observable<Oid>` so validation errors flow through the stream
+   * instead of being thrown synchronously.
+   */
+  build(store: ObjectStore): Observable<Oid> {
     if (this.treeValue === undefined) {
-      throw new Error("CommitBuilder: tree is required");
+      return throwError(() => new Error("CommitBuilder: tree is required"));
     }
     if (this.authorValue === undefined) {
-      throw new Error("CommitBuilder: author is required");
+      return throwError(() => new Error("CommitBuilder: author is required"));
     }
     if (this.committerValue === undefined) {
-      throw new Error("CommitBuilder: committer is required");
+      return throwError(() => new Error("CommitBuilder: committer is required"));
     }
 
-    const info: CommitInfo = {
+    const info: Omit<CommitInfo, "oid"> = {
       tree: this.treeValue,
       parents: this.parents,
       author: this.authorValue,
@@ -116,7 +124,9 @@ export class CommitBuilder {
     };
 
     const bytes = buildCommitBytes(info);
-    const object = await store.write("commit", bytes);
-    return object.oid;
+    return of(bytes).pipe(
+      concatMap((content) => store.write("commit", content)),
+      map((object) => object.oid),
+    );
   }
 }

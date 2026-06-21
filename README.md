@@ -2,8 +2,6 @@
 
 A lightweight, embeddable **Git SDK** written in TypeScript for Node.js 18+. It is **SDK-first**, not CLI-first: applications import a programmatic API and work with repository objects directly.
 
-> **Status:** Phase 0 (core object model) and Phase 1 (staging & commit) are implemented. The current release runs on the in-memory backend; a Node.js filesystem backend is planned for upcoming phases.
-
 ## Packages
 
 This repository is a Bun workspace monorepo:
@@ -25,23 +23,28 @@ bun install
 ## Quick start
 
 ```ts
+import { lastValueFrom } from "rxjs";
 import { createMemoryRepository } from "slim-git";
 
-const repo = await createMemoryRepository();
+const repo = await lastValueFrom(createMemoryRepository());
 
 // Write a file, stage it, and commit it
-await repo.workspace.writeFile("hello.txt", new TextEncoder().encode("Hello, slim-git!"));
-await repo.add(["hello.txt"]);
+await lastValueFrom(
+  repo.workspace.writeFile("hello.txt", new TextEncoder().encode("Hello, slim-git!")),
+);
+await lastValueFrom(repo.add(["hello.txt"]));
 
-const oid = await repo.commit({
-  message: "Initial commit",
-  author: {
-    name: "Developer",
-    email: "dev@example.com",
-    timestamp: new Date(),
-    timezoneOffsetMinutes: 0,
-  },
-});
+const oid = await lastValueFrom(
+  repo.commit({
+    message: "Initial commit",
+    author: {
+      name: "Developer",
+      email: "dev@example.com",
+      timestamp: new Date(),
+      timezoneOffsetMinutes: 0,
+    },
+  }),
+);
 
 console.log("Created commit:", oid);
 ```
@@ -53,6 +56,10 @@ console.log("Created commit:", oid);
 - Staging: `add`, `remove`, `restore`
 - Commits: `commit`, `amend`
 - Status: modified, staged, deleted, and untracked files
+- History: `log`
+- Branches: `createBranch`, `listBranches`, `deleteBranch`, `getCurrentBranch`
+- Tags: `createTag`, `listTags`, `deleteTag`
+- Workspace switching: `checkout`
 
 ## Scripts
 
@@ -72,6 +79,7 @@ bun run fmt:check # check formatting
 ├────────────────────────────────────┤
 │  Repository                        │
 │  - status, add, commit, amend …    │
+│  - log, branches, tags, checkout   │
 ├────────────────────────────────────┤
 │  Object Store + Ref/Index Stores   │
 ├────────────────────────────────────┤
@@ -87,7 +95,7 @@ Phases follow [`plan.md`](./plan.md):
 
 - [x] Phase 0 — Core object model (memory backend)
 - [x] Phase 1 — Staging & commit
-- [ ] Phase 2 — History & branches
+- [x] Phase 2 — History & branches
 - [ ] Phase 3 — Diff
 - [ ] Phase 4 — Remotes (smart HTTP fetch/push)
 - [ ] Phase 5 — Merge (fast-forward + conflict markers)

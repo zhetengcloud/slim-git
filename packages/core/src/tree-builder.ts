@@ -1,4 +1,5 @@
 import type { Oid, TreeEntry } from "@slim-git/types";
+import { concatMap, forkJoin, map, type Observable, of } from "rxjs";
 import type { ObjectStore } from "./object-store.js";
 
 /** Splits a file path into its directory segments. */
@@ -86,19 +87,22 @@ const insertIntoNode = (
  * Recursively writes tree objects bottom-up.
  * Each directory node becomes a tree object; its oid is inserted into its parent.
  */
-const buildNode = async (node: TreeNode, store: ObjectStore): Promise<Oid> => {
-  const childEntries: TreeEntry[] = await Promise.all(
-    Array.from(node.children.entries()).map(async ([name, child]) => ({
-      mode: 0o040000,
-      name,
-      oid: await buildNode(child, store),
-    })),
-  );
+const buildNode$ = (node: TreeNode, store: ObjectStore): Observable<Oid> => {
+  const childEntries$: Observable<TreeEntry[]> =
+    node.children.size === 0
+      ? of([])
+      : forkJoin(
+          Array.from(node.children.entries()).map(([name, child]) =>
+            buildNode$(child, store).pipe(map((oid) => ({ mode: 0o040000, name, oid }))),
+          ),
+        );
 
-  const allEntries = [...node.entries, ...childEntries];
-  const bytes = buildTreeBytes(allEntries);
-  const written = await store.write("tree", bytes);
-  return written.oid;
+  return childEntries$.pipe(
+    map((childEntries) => [...node.entries, ...childEntries]),
+    map((allEntries) => buildTreeBytes(allEntries)),
+    concatMap((bytes) => store.write("tree", bytes)),
+    map((written) => written.oid),
+  );
 };
 
 /**
@@ -106,10 +110,12 @@ const buildNode = async (node: TreeNode, store: ObjectStore): Promise<Oid> => {
  *
  * Example:
  * ```ts
- * const rootTree = await new TreeBuilder()
- *   .insert("src/index.ts", oid, mode)
- *   .insert("README.md", oid, mode)
- *   .build(objectStore);
+ * const rootTree = await lastValueFrom(
+ *   new TreeBuilder()
+ *     .insert("src/index.ts", oid, mode)
+ *     .insert("README.md", oid, mode)
+ *     .build(objectStore)
+ * );
  * ```
  */
 export class TreeBuilder {
@@ -127,7 +133,7 @@ export class TreeBuilder {
   }
 
   /** Writes all tree objects and returns the oid of the root tree. */
-  async build(store: ObjectStore): Promise<Oid> {
-    return buildNode(this.root, store);
+  build(store: ObjectStore): Observable<Oid> {
+    return buildNode$(this.root, store);
   }
 }

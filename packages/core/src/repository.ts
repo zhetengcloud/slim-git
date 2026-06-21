@@ -1,6 +1,26 @@
-import type { IndexEntry, Oid, Person, Status } from "@slim-git/types";
+import type {
+  AddResult,
+  Branch,
+  CheckoutResult,
+  CommitInfo,
+  CreateBranchResult,
+  CreateTagResult,
+  DeleteBranchResult,
+  DeleteTagResult,
+  DestroyResult,
+  IndexEntry,
+  LogOptions,
+  Oid,
+  Person,
+  RemoveResult,
+  RestoreResult,
+  Status,
+  Tag,
+} from "@slim-git/types";
+import { ConflictError, NotFoundError, UnsupportedError } from "@slim-git/types";
 import type { StorageBackend } from "./backend.js";
 import { CommitBuilder } from "./commit-builder.js";
+import { parseCommit$ } from "./commit-parser.js";
 import { DefaultHash, type HashAlgorithm } from "./hash.js";
 import { Index } from "./index-model.js";
 import type { IndexStore } from "./index-store.js";
@@ -8,6 +28,19 @@ import { ObjectStore } from "./object-store.js";
 import type { RefStore } from "./ref-store.js";
 import { TreeBuilder } from "./tree-builder.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
+import {
+  combineLatest,
+  concatMap,
+  defaultIfEmpty,
+  distinct,
+  expand,
+  forkJoin,
+  from,
+  map,
+  of,
+  type Observable,
+  throwError,
+} from "rxjs";
 
 /** Options used when initializing or opening a repository. */
 export interface RepositoryOptions {
@@ -24,8 +57,20 @@ export interface CommitOptions {
   readonly committer?: Person;
 }
 
+/** Options used when creating a branch or tag. */
+export interface RefCreateOptions {
+  /** Target ref name or oid. Defaults to HEAD. */
+  readonly target?: string;
+}
+
 /** Default file mode used for regular files staged into the index. */
 const DefaultFileMode = 0o100644;
+
+/**
+ * True if the string looks like a SHA-1 (40 hex) or SHA-256 (64 hex) oid.
+ */
+const looksLikeOid = (value: string): boolean =>
+  /^[0-9a-f]{40}$/i.test(value) || /^[0-9a-f]{64}$/i.test(value);
 
 /**
  * Creates an index entry from a workspace file.
@@ -97,28 +142,66 @@ const parseTreeEntries = (content: Uint8Array): Map<string, TreeEntryMap> => {
  * Recursively walks a tree to find the entry at the given path segments.
  * Returns undefined if any segment is missing.
  */
-const findInTree = async (
+const findInTree$ = (
   store: ObjectStore,
   treeOid: Oid,
   segments: readonly string[],
-): Promise<TreeEntryMap | undefined> => {
+): Observable<TreeEntryMap | undefined> => {
   if (segments.length === 0) {
-    return undefined;
+    return of(undefined);
   }
 
-  const tree = await store.read(treeOid);
-  const entries = parseTreeEntries(tree.content);
-  const entry = entries.get(segments[0]!);
+  return store.read(treeOid).pipe(
+    map((tree) => parseTreeEntries(tree.content)),
+    concatMap((entries) => {
+      const entry = entries.get(segments[0]!);
+      if (entry === undefined) {
+        return of(undefined);
+      }
+      if (segments.length === 1) {
+        return of(entry);
+      }
+      return findInTree$(store, entry.oid, segments.slice(1));
+    }),
+  );
+};
 
-  if (entry === undefined) {
-    return undefined;
-  }
+/**
+ * Recursively flattens a tree into a map of path → { oid, mode } for all blobs.
+ * Directory paths are expanded; the returned map only contains files.
+ */
+const flattenTree$ = (
+  store: ObjectStore,
+  treeOid: Oid,
+  prefix = "",
+): Observable<Map<string, TreeEntryMap>> => {
+  return store.read(treeOid).pipe(
+    map((tree) => parseTreeEntries(tree.content)),
+    concatMap((entries) => {
+      const childTasks = Array.from(entries).map(([name, entry]) => {
+        const path = prefix ? `${prefix}/${name}` : name;
+        if (entry.mode === 0o040000) {
+          return flattenTree$(store, entry.oid, path).pipe(
+            map((childEntries) => Array.from(childEntries) as [string, TreeEntryMap][]),
+          );
+        }
+        return of([[path, entry]] as [string, TreeEntryMap][]);
+      });
 
-  if (segments.length === 1) {
-    return entry;
-  }
-
-  return findInTree(store, entry.oid, segments.slice(1));
+      return childTasks.length === 0
+        ? of(new Map<string, TreeEntryMap>())
+        : forkJoin(childTasks).pipe(
+            map((groups) =>
+              groups.reduce((map, group) => {
+                for (const [path, entry] of group) {
+                  map.set(path, entry);
+                }
+                return map;
+              }, new Map<string, TreeEntryMap>()),
+            ),
+          );
+    }),
+  );
 };
 
 /**
@@ -126,6 +209,9 @@ const findInTree = async (
  *
  * `Repository` wires together storage, refs, index, workspace, and the object store
  * to provide the everyday Git operations implemented by slim-git.
+ *
+ * All async operations return RxJS `Observable`s. Consumers unwrap values with
+ * `lastValueFrom`, `firstValueFrom`, or any RxJS operator.
  */
 export class Repository {
   readonly objectStore: ObjectStore;
@@ -147,20 +233,30 @@ export class Repository {
   }
 
   /** Creates a fresh repository instance backed by the given storage backend. */
-  static async init(backend: StorageBackend, options: RepositoryOptions = {}): Promise<Repository> {
-    return new Repository(
-      backend,
-      options.hash ?? DefaultHash,
-      options.refs ?? { read: async () => undefined, write: async () => {}, list: async () => [] },
-      options.index ?? { read: async () => Index.empty(), write: async () => {} },
-      options.workspace ?? {
-        name: "noop",
-        readFile: async () => new Uint8Array(),
-        writeFile: async () => {},
-        removeFile: async () => {},
-        listFiles: async () => [],
-        exists: async () => false,
-      },
+  static init(backend: StorageBackend, options: RepositoryOptions = {}): Observable<Repository> {
+    return of(
+      new Repository(
+        backend,
+        options.hash ?? DefaultHash,
+        options.refs ?? {
+          read: (_ref) => of(undefined),
+          write: (_ref, target) => of({ ref: _ref, target }),
+          delete: (_ref) => of({ ref: _ref }),
+          list: () => of([]),
+        },
+        options.index ?? {
+          read: () => of(Index.empty()),
+          write: (index) => of({ entries: index.paths.length }),
+        },
+        options.workspace ?? {
+          name: "noop",
+          readFile: () => of(new Uint8Array()),
+          writeFile: (path) => of({ path }),
+          removeFile: (path) => of({ path }),
+          listFiles: () => of([]),
+          exists: () => of(false),
+        },
+      ),
     );
   }
 
@@ -169,7 +265,7 @@ export class Repository {
    * Currently equivalent to `init` because slim-git does not yet persist repository
    * metadata; this will evolve once the filesystem backend lands.
    */
-  static async open(backend: StorageBackend, options: RepositoryOptions = {}): Promise<Repository> {
+  static open(backend: StorageBackend, options: RepositoryOptions = {}): Observable<Repository> {
     return Repository.init(backend, options);
   }
 
@@ -181,110 +277,167 @@ export class Repository {
    * - `deleted` — tracked files that no longer exist in the workspace.
    * - `untracked` — workspace files not present in the index.
    */
-  async status(): Promise<Status> {
-    const index = await this.indexStore.read();
-    const workspaceFiles = await this.workspace.listFiles();
-    const headTree = await this.readHeadTree();
-
-    const staged = await this.computeStaged(index, headTree);
-
-    const trackedChanges = await Promise.all(
-      index.paths.map(async (path) => {
-        if (!(await this.workspace.exists(path))) {
-          return { path, kind: "deleted" as const };
-        }
-        const workspaceContent = await this.workspace.readFile(path);
-        const blob = this.objectStore.hashObject("blob", workspaceContent);
-        return blob.oid !== index.get(path)?.oid ? { path, kind: "modified" as const } : undefined;
-      }),
+  status(): Observable<Status> {
+    return combineLatest([
+      this.indexStore.read(),
+      this.workspace.listFiles(),
+      this.readHeadTree$(),
+    ]).pipe(
+      concatMap(([index, workspaceFiles, headTree]) =>
+        this.computeStaged$(index, headTree).pipe(
+          concatMap((staged) =>
+            this.computeTrackedChanges$(index).pipe(map((changes) => ({ staged, ...changes }))),
+          ),
+          map(({ staged, modified, deleted }) => {
+            const tracked = new Set(index.paths);
+            const untracked = workspaceFiles.filter((path) => !tracked.has(path));
+            return { staged, modified, deleted, untracked };
+          }),
+        ),
+      ),
     );
-
-    const modified = trackedChanges
-      .filter((change) => change?.kind === "modified")
-      .map((change) => change!.path);
-    const deleted = trackedChanges
-      .filter((change) => change?.kind === "deleted")
-      .map((change) => change!.path);
-
-    const tracked = new Set(index.paths);
-    const untracked = workspaceFiles.filter((path) => !tracked.has(path));
-
-    return { staged, modified, deleted, untracked };
   }
 
   /** Reads HEAD and returns the tree oid of the commit it points to, if any. */
-  private async readHeadTree(): Promise<Oid | undefined> {
-    const head = await this.refs.read("HEAD");
-    if (head === undefined) {
-      return undefined;
+  private readHeadTree$(): Observable<Oid | undefined> {
+    return this.resolveRef("HEAD").pipe(
+      concatMap((head) => {
+        if (head === undefined) {
+          return of(undefined);
+        }
+        return this.readCommitTree$(head);
+      }),
+    );
+  }
+
+  /** Reads a commit object and returns the oid of its tree. */
+  private readCommitTree$(oid: Oid): Observable<Oid> {
+    return this.objectStore.read(oid).pipe(
+      concatMap((commit) => parseCommit$(commit)),
+      map((info) => info.tree),
+    );
+  }
+
+  /** Computes modified/deleted changes for all tracked paths. */
+  private computeTrackedChanges$(
+    index: Index,
+  ): Observable<{ modified: string[]; deleted: string[] }> {
+    if (index.paths.length === 0) {
+      return of({ modified: [], deleted: [] });
     }
-    const commit = await this.objectStore.read(head as Oid);
-    const treeLine = new TextDecoder()
-      .decode(commit.content)
-      .split("\n")
-      .find((line) => line.startsWith("tree "));
-    return treeLine?.slice(5) as Oid | undefined;
+
+    return forkJoin(
+      index.paths.map((path) =>
+        this.workspace.exists(path).pipe(
+          concatMap((exists) => {
+            if (!exists) {
+              return of({ path, kind: "deleted" as const });
+            }
+            return this.workspace.readFile(path).pipe(
+              map((content) => {
+                const blob = this.objectStore.hashObject("blob", content);
+                return blob.oid !== index.get(path)?.oid
+                  ? { path, kind: "modified" as const }
+                  : undefined;
+              }),
+            );
+          }),
+        ),
+      ),
+    ).pipe(
+      map((changes) => ({
+        modified: changes
+          .filter((change) => change?.kind === "modified")
+          .map((change) => change!.path),
+        deleted: changes
+          .filter((change) => change?.kind === "deleted")
+          .map((change) => change!.path),
+      })),
+    );
   }
 
   /**
    * Computes staged paths by comparing each index entry to its counterpart
    * in the HEAD tree. When there is no HEAD, every path is considered staged.
    */
-  private async computeStaged(index: Index, headTree: Oid | undefined): Promise<string[]> {
-    if (headTree === undefined) {
-      return index.paths;
+  private computeStaged$(index: Index, headTree: Oid | undefined): Observable<string[]> {
+    if (headTree === undefined || index.paths.length === 0) {
+      return of(index.paths);
     }
 
-    const changes = await Promise.all(
-      index.paths.map(async (path) => {
+    return forkJoin(
+      index.paths.map((path) => {
         const entry = index.get(path);
         if (entry === undefined) {
-          return undefined;
+          return of(undefined);
         }
-        const headEntry = await findInTree(
-          this.objectStore,
-          headTree,
-          path.split("/").filter(Boolean),
+        return findInTree$(this.objectStore, headTree, path.split("/").filter(Boolean)).pipe(
+          map((headEntry) => (headEntry?.oid !== entry.oid ? path : undefined)),
         );
-        return headEntry?.oid !== entry.oid ? path : undefined;
       }),
-    );
-
-    return changes.filter((path): path is string => path !== undefined);
+    ).pipe(map((changes) => changes.filter((path): path is string => path !== undefined)));
   }
 
   /** Stages workspace files as blobs in the index. */
-  async add(paths: readonly string[]): Promise<void> {
-    const index = await this.indexStore.read();
-    const next = await paths.reduce<Promise<Index>>(async (currentIndexPromise, path) => {
-      const currentIndex = await currentIndexPromise;
-      const content = await this.workspace.readFile(path);
-      const blob = await this.objectStore.write("blob", content);
-      const entry = createIndexEntry(path, blob.oid, content);
-      return currentIndex.add(entry);
-    }, Promise.resolve(index));
-    await this.indexStore.write(next);
+  add(paths: readonly string[]): Observable<AddResult> {
+    return this.indexStore.read().pipe(
+      concatMap((index) =>
+        paths.reduce<Observable<Index>>(
+          (index$, path) =>
+            index$.pipe(
+              concatMap((currentIndex) =>
+                this.workspace.readFile(path).pipe(
+                  concatMap((content) =>
+                    this.objectStore
+                      .write("blob", content)
+                      .pipe(map((blob) => ({ blob, content }))),
+                  ),
+                  map(({ blob, content }) =>
+                    currentIndex.add(createIndexEntry(path, blob.oid, content)),
+                  ),
+                ),
+              ),
+            ),
+          of(index),
+        ),
+      ),
+      concatMap((next) => this.indexStore.write(next)),
+      map(() => ({ added: paths })),
+    );
   }
 
   /** Removes files from both the workspace and the index. */
-  async remove(paths: readonly string[]): Promise<void> {
-    const index = await this.indexStore.read();
-    await Promise.all(paths.map((path) => this.workspace.removeFile(path)));
-    await this.indexStore.write(index.removeMany(paths));
+  remove(paths: readonly string[]): Observable<RemoveResult> {
+    return this.indexStore.read().pipe(
+      concatMap((index) =>
+        forkJoin(paths.map((path) => this.workspace.removeFile(path))).pipe(
+          defaultIfEmpty([]),
+          map(() => index.removeMany(paths)),
+        ),
+      ),
+      concatMap((next) => this.indexStore.write(next)),
+      map(() => ({ removed: paths })),
+    );
   }
 
   /** Writes the indexed version of each path back into the workspace. */
-  async restore(paths: readonly string[]): Promise<void> {
-    const index = await this.indexStore.read();
-    await Promise.all(
-      paths.map(async (path) => {
-        const entry = index.get(path);
-        if (entry === undefined) {
-          return;
-        }
-        const object = await this.objectStore.read(entry.oid);
-        await this.workspace.writeFile(path, object.content);
-      }),
+  restore(paths: readonly string[]): Observable<RestoreResult> {
+    return this.indexStore.read().pipe(
+      concatMap((index) =>
+        forkJoin(
+          paths.map((path) => {
+            const entry = index.get(path);
+            if (entry === undefined) {
+              return of(undefined);
+            }
+            return this.objectStore
+              .read(entry.oid)
+              .pipe(concatMap((object) => this.workspace.writeFile(path, object.content)));
+          }),
+        ),
+      ),
+      defaultIfEmpty([]),
+      map(() => ({ restored: paths })),
     );
   }
 
@@ -294,60 +447,334 @@ export class Repository {
    * Note: clearing the index after commit is the current slim-git behavior for the
    * memory backend; it will be revised to match canonical Git once persistence lands.
    */
-  async commit(options: CommitOptions): Promise<Oid> {
-    const index = await this.indexStore.read();
-    const treeOid = await this.buildTreeFromIndex(index);
-    const parent = await this.refs.read("HEAD");
-
-    const builder = new CommitBuilder()
-      .tree(treeOid)
-      .author(options.author)
-      .committer(options.committer ?? options.author)
-      .message(options.message);
-
-    if (parent !== undefined) {
-      builder.parent(parent as Oid);
-    }
-
-    const commitOid = await builder.build(this.objectStore);
-    await this.refs.write("HEAD", commitOid);
-    await this.indexStore.write(Index.empty());
-    return commitOid;
+  commit(options: CommitOptions): Observable<Oid> {
+    return combineLatest([this.indexStore.read(), this.resolveRef("HEAD")]).pipe(
+      concatMap(([index, parent]) =>
+        this.buildTreeFromIndex$(index).pipe(
+          map((treeOid) => {
+            const builder = new CommitBuilder()
+              .tree(treeOid)
+              .author(options.author)
+              .committer(options.committer ?? options.author)
+              .message(options.message);
+            if (parent !== undefined) {
+              builder.parent(parent);
+            }
+            return builder;
+          }),
+        ),
+      ),
+      concatMap((builder) => builder.build(this.objectStore)),
+      concatMap((commitOid) =>
+        this.refs
+          .write("HEAD", commitOid)
+          .pipe(concatMap(() => this.indexStore.write(Index.empty())))
+          .pipe(map(() => commitOid)),
+      ),
+    );
   }
 
   /** Rewrites the current HEAD commit in place, keeping its tree and parents. */
-  async amend(options: CommitOptions): Promise<Oid> {
-    const headTarget = await this.refs.read("HEAD");
-    if (headTarget === undefined) {
-      throw new Error("Cannot amend: HEAD does not exist");
+  amend(options: CommitOptions): Observable<Oid> {
+    return this.amend$(options);
+  }
+
+  private amend$(options: CommitOptions): Observable<Oid> {
+    return this.resolveRef("HEAD").pipe(
+      concatMap((headTarget) => {
+        if (headTarget === undefined) {
+          return throwError(() => new Error("Cannot amend: HEAD does not exist"));
+        }
+        return this.objectStore.read(headTarget).pipe(
+          concatMap((headCommit) => parseCommit$(headCommit)),
+          concatMap((info) => {
+            const builder = new CommitBuilder()
+              .tree(info.tree)
+              .parentsList(info.parents)
+              .author(options.author)
+              .committer(options.committer ?? options.author)
+              .message(options.message);
+            return builder.build(this.objectStore);
+          }),
+          concatMap((commitOid) => this.refs.write("HEAD", commitOid).pipe(map(() => commitOid))),
+        );
+      }),
+    );
+  }
+
+  /**
+   * Returns an Observable that emits commit history starting from HEAD or the given ref.
+   *
+   * The stream walks parents breadth-first, deduplicates shared ancestors, and can be
+   * composed with any RxJS operators (e.g. `take(10)`).
+   */
+  log(options: LogOptions = {}): Observable<CommitInfo> {
+    const startRef = options.ref ?? "HEAD";
+
+    return this.resolveCommitInfo$(startRef).pipe(
+      expand((commit) =>
+        from(commit.parents).pipe(concatMap((parent) => this.resolveCommitInfo$(parent))),
+      ),
+      distinct((commit) => commit.oid),
+    );
+  }
+
+  /** Resolves a ref name, branch name, or oid to a `CommitInfo`. */
+  private resolveCommitInfo$(ref: string): Observable<CommitInfo> {
+    return this.resolveRef(ref).pipe(
+      concatMap((oid) => {
+        if (oid === undefined) {
+          return throwError(() => new NotFoundError(`ref ${ref}`));
+        }
+        return this.objectStore.read(oid).pipe(concatMap((object) => parseCommit$(object)));
+      }),
+    );
+  }
+
+  /**
+   * Resolves a ref name, branch/tag short name, or oid to an oid.
+   * Handles symbolic refs of the form `ref: refs/heads/main` and falls back to
+   * `refs/heads/<name>` and `refs/tags/<name>` for short names.
+   */
+  private resolveRef(name: string): Observable<Oid | undefined> {
+    if (looksLikeOid(name)) {
+      return of(name as Oid);
     }
 
-    const headCommit = await this.objectStore.read(headTarget as Oid);
-    const treeLine = new TextDecoder()
-      .decode(headCommit.content)
-      .split("\n")
-      .find((line) => line.startsWith("tree "));
-    const treeOid = treeLine?.slice(5) as Oid | undefined;
+    const tryNames = [name, `refs/heads/${name}`, `refs/tags/${name}`];
+    return this.tryResolveRefs$(tryNames);
+  }
 
-    if (treeOid === undefined) {
-      throw new Error("Cannot amend: HEAD commit has no tree");
+  private tryResolveRefs$(names: readonly string[]): Observable<Oid | undefined> {
+    if (names.length === 0) {
+      return of(undefined);
     }
 
-    const parents = await this.readParents(headTarget as Oid);
-    const builder = new CommitBuilder()
-      .tree(treeOid)
-      .parentsList(parents)
-      .author(options.author)
-      .committer(options.committer ?? options.author)
-      .message(options.message);
+    const [first, ...rest] = names;
+    return this.refs.read(first!).pipe(
+      concatMap((target) => {
+        if (target === undefined) {
+          return this.tryResolveRefs$(rest);
+        }
+        if (target.startsWith("ref: ")) {
+          return this.resolveRef(target.slice(5));
+        }
+        return of(target as Oid);
+      }),
+    );
+  }
 
-    const commitOid = await builder.build(this.objectStore);
-    await this.refs.write("HEAD", commitOid);
-    return commitOid;
+  /** Creates a new branch pointing at `target` (default HEAD). */
+  createBranch(name: string, options: RefCreateOptions = {}): Observable<CreateBranchResult> {
+    return this.createBranch$(name, options);
+  }
+
+  private createBranch$(name: string, options: RefCreateOptions): Observable<CreateBranchResult> {
+    const refName = `refs/heads/${name}`;
+    const target$ =
+      options.target !== undefined ? of(options.target as Oid) : this.resolveRef("HEAD");
+
+    return this.refs.read(refName).pipe(
+      concatMap((existing) => {
+        if (existing !== undefined) {
+          return throwError(() => new ConflictError(`branch ${name}`));
+        }
+        return target$;
+      }),
+      concatMap((target) => {
+        if (target === undefined) {
+          return throwError(() => new NotFoundError("HEAD"));
+        }
+        return this.refs.write(refName, target).pipe(map(() => ({ name, target })));
+      }),
+    );
+  }
+
+  /** Lists all local branches sorted by name. */
+  listBranches(): Observable<Branch[]> {
+    return this.refs.list("refs/heads/").pipe(
+      map((refs) =>
+        refs
+          .map((ref) => ({
+            name: ref.name.slice("refs/heads/".length),
+            target: ref.target as Oid,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      ),
+    );
+  }
+
+  /** Deletes a local branch. Refuses to delete the currently checked-out branch. */
+  deleteBranch(name: string): Observable<DeleteBranchResult> {
+    return this.deleteBranch$(name);
+  }
+
+  private deleteBranch$(name: string): Observable<DeleteBranchResult> {
+    return this.getCurrentBranch().pipe(
+      concatMap((current) => {
+        if (current === name) {
+          return throwError(() => new UnsupportedError("cannot delete the current branch"));
+        }
+        return this.refs.delete(`refs/heads/${name}`).pipe(map(() => ({ name })));
+      }),
+    );
+  }
+
+  /**
+   * Returns the name of the current branch, or `undefined` if HEAD is detached.
+   * Reads HEAD and parses symbolic refs like `ref: refs/heads/main`.
+   */
+  getCurrentBranch(): Observable<string | undefined> {
+    return this.refs.read("HEAD").pipe(
+      map((head) => {
+        if (head === undefined || !head.startsWith("ref: refs/heads/")) {
+          return undefined;
+        }
+        return head.slice("ref: refs/heads/".length);
+      }),
+    );
+  }
+
+  /**
+   * Switches the working tree and index to a branch or commit.
+   *
+   * - If `target` matches a branch name, HEAD becomes a symbolic ref to that branch.
+   * - If `target` is a commit oid, HEAD becomes detached at that commit.
+   */
+  checkout(target: string): Observable<CheckoutResult> {
+    return this.checkout$(target);
+  }
+
+  private checkout$(target: string): Observable<CheckoutResult> {
+    const branchRef = `refs/heads/${target}`;
+
+    return this.refs.read(branchRef).pipe(
+      concatMap((branchTarget) => {
+        if (branchTarget !== undefined) {
+          return of({ commitOid: branchTarget as Oid, headValue: `ref: ${branchRef}` });
+        }
+        const oid = target as Oid;
+        return this.objectStore.read(oid).pipe(
+          concatMap((object) => {
+            if (object.type !== "commit") {
+              return throwError(() => new NotFoundError(`commit ${target}`));
+            }
+            return of({ commitOid: oid, headValue: target });
+          }),
+        );
+      }),
+      concatMap(({ commitOid, headValue }) =>
+        this.readCommitTree$(commitOid).pipe(
+          concatMap((treeOid) => flattenTree$(this.objectStore, treeOid)),
+          concatMap((treeEntries) => this.applyTreeToWorkspace$(treeEntries)),
+          concatMap((treeEntries) => this.buildIndexFromTree$(treeEntries)),
+          concatMap((index) => this.refs.write("HEAD", headValue).pipe(map(() => index))),
+          concatMap((index) =>
+            this.indexStore
+              .write(index)
+              .pipe(
+                map(() => ({
+                  commitOid,
+                  branch: headValue.startsWith("ref: ")
+                    ? headValue.slice("ref: refs/heads/".length)
+                    : undefined,
+                })),
+              ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /** Removes workspace files not present in the target tree and writes the tree files. */
+  private applyTreeToWorkspace$(
+    treeEntries: Map<string, TreeEntryMap>,
+  ): Observable<Map<string, TreeEntryMap>> {
+    return this.workspace.listFiles().pipe(
+      concatMap((workspaceFiles) => {
+        const toRemove = workspaceFiles.filter((path) => !treeEntries.has(path));
+        return forkJoin(toRemove.map((path) => this.workspace.removeFile(path))).pipe(
+          defaultIfEmpty([]),
+          map(() => treeEntries),
+        );
+      }),
+      concatMap((entries) =>
+        forkJoin(
+          Array.from(entries).map(([path, entry]) =>
+            this.objectStore
+              .read(entry.oid)
+              .pipe(concatMap((object) => this.workspace.writeFile(path, object.content))),
+          ),
+        ).pipe(
+          defaultIfEmpty([]),
+          map(() => entries),
+        ),
+      ),
+    );
+  }
+
+  /** Builds an index from a flattened tree. */
+  private buildIndexFromTree$(treeEntries: Map<string, TreeEntryMap>): Observable<Index> {
+    return Array.from(treeEntries).reduce<Observable<Index>>(
+      (index$, [path, entry]) =>
+        index$.pipe(
+          concatMap((index) =>
+            this.objectStore
+              .read(entry.oid)
+              .pipe(map((object) => index.add(createIndexEntry(path, entry.oid, object.content)))),
+          ),
+        ),
+      of(Index.empty()),
+    );
+  }
+
+  /** Creates a lightweight tag pointing at `target` (default HEAD). */
+  createTag(name: string, options: RefCreateOptions = {}): Observable<CreateTagResult> {
+    return this.createTag$(name, options);
+  }
+
+  private createTag$(name: string, options: RefCreateOptions): Observable<CreateTagResult> {
+    const refName = `refs/tags/${name}`;
+    const target$ =
+      options.target !== undefined ? of(options.target as Oid) : this.resolveRef("HEAD");
+
+    return this.refs.read(refName).pipe(
+      concatMap((existing) => {
+        if (existing !== undefined) {
+          return throwError(() => new ConflictError(`tag ${name}`));
+        }
+        return target$;
+      }),
+      concatMap((target) => {
+        if (target === undefined) {
+          return throwError(() => new NotFoundError("HEAD"));
+        }
+        return this.refs.write(refName, target).pipe(map(() => ({ name, target })));
+      }),
+    );
+  }
+
+  /** Lists all lightweight tags sorted by name. */
+  listTags(): Observable<Tag[]> {
+    return this.refs.list("refs/tags/").pipe(
+      map((refs) =>
+        refs
+          .map((ref) => ({
+            name: ref.name.slice("refs/tags/".length),
+            target: ref.target as Oid,
+          }))
+          .sort((a, b) => a.name.localeCompare(b.name)),
+      ),
+    );
+  }
+
+  /** Deletes a lightweight tag. */
+  deleteTag(name: string): Observable<DeleteTagResult> {
+    return this.refs.delete(`refs/tags/${name}`).pipe(map(() => ({ name })));
   }
 
   /** Builds a tree object from every entry in the index and returns its oid. */
-  private async buildTreeFromIndex(index: Index): Promise<Oid> {
+  private buildTreeFromIndex$(index: Index): Observable<Oid> {
     const builder = index.toArray().reduce((tree, entry) => {
       return tree.insert(entry.path, entry.oid, entry.mode);
     }, new TreeBuilder());
@@ -355,18 +782,8 @@ export class Repository {
     return builder.build(this.objectStore);
   }
 
-  /** Extracts parent oids from a commit object's text content. */
-  private async readParents(commitOid: Oid): Promise<Oid[]> {
-    const object = await this.objectStore.read(commitOid);
-    const text = new TextDecoder().decode(object.content);
-    return text
-      .split("\n")
-      .filter((line) => line.startsWith("parent "))
-      .map((line) => line.slice(7) as Oid);
-  }
-
   /** Releases any resources held by the repository. */
-  destroy(): Promise<void> {
-    return Promise.resolve();
+  destroy(): Observable<DestroyResult> {
+    return of({ destroyed: true });
   }
 }

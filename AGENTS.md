@@ -57,6 +57,8 @@ This file contains project-specific instructions for coding agents working on **
 - Use property-based tests where they add value (e.g., content-addressing, index consistency).
 - Tests should be clear, isolated, and run with `bun test`.
 - Aim for high coverage on the core object model, refs, index, and commit path.
+- Keep tests in a `test/` folder within each package; avoid co-locating `.test.ts` files with source files.
+- In tests, import the package under test through its workspace name (e.g. `@slim-git/core`) instead of using relative `../src/` paths.
 
 ## 7. Git Commits
 

@@ -1,5 +1,6 @@
 import type { Oid } from "@slim-git/types";
 import { describe, expect, test } from "bun:test";
+import { lastValueFrom } from "rxjs";
 import { Index, NotFoundError, Sha1Hash } from "@slim-git/core";
 import {
   MemoryBackend,
@@ -13,8 +14,8 @@ describe("MemoryBackend", () => {
     const backend = new MemoryBackend();
     const object = Sha1Hash.hashObject("blob", new TextEncoder().encode("data"));
 
-    await backend.writeObject(object);
-    const read = await backend.readObject(object.oid);
+    await lastValueFrom(backend.writeObject(object));
+    const read = await lastValueFrom(backend.readObject(object.oid));
 
     expect(read.oid).toBe(object.oid);
     expect(read.type).toBe("blob");
@@ -25,7 +26,7 @@ describe("MemoryBackend", () => {
     const backend = new MemoryBackend();
 
     await expect(
-      backend.readObject("0000000000000000000000000000000000000000" as Oid),
+      lastValueFrom(backend.readObject("0000000000000000000000000000000000000000" as Oid)),
     ).rejects.toThrow(NotFoundError);
   });
 
@@ -33,27 +34,27 @@ describe("MemoryBackend", () => {
     const backend = new MemoryBackend();
     const object = Sha1Hash.hashObject("blob", new TextEncoder().encode("x"));
 
-    expect(await backend.exists(object.oid)).toBe(false);
-    await backend.writeObject(object);
-    expect(await backend.exists(object.oid)).toBe(true);
+    expect(await lastValueFrom(backend.exists(object.oid))).toBe(false);
+    await lastValueFrom(backend.writeObject(object));
+    expect(await lastValueFrom(backend.exists(object.oid))).toBe(true);
   });
 });
 
 describe("MemoryRefStore", () => {
   test("writes and reads refs", async () => {
     const refs = new MemoryRefStore();
-    await refs.write("HEAD", "abc123");
+    await lastValueFrom(refs.write("HEAD", "abc123"));
 
-    expect(await refs.read("HEAD")).toBe("abc123");
+    expect(await lastValueFrom(refs.read("HEAD"))).toBe("abc123");
   });
 
   test("lists refs by prefix", async () => {
     const refs = new MemoryRefStore();
-    await refs.write("refs/heads/main", "a");
-    await refs.write("refs/heads/dev", "b");
-    await refs.write("refs/tags/v1", "c");
+    await lastValueFrom(refs.write("refs/heads/main", "a"));
+    await lastValueFrom(refs.write("refs/heads/dev", "b"));
+    await lastValueFrom(refs.write("refs/tags/v1", "c"));
 
-    const branches = await refs.list("refs/heads/");
+    const branches = await lastValueFrom(refs.list("refs/heads/"));
     expect(branches.map((r) => r.name)).toEqual(["refs/heads/dev", "refs/heads/main"]);
   });
 });
@@ -81,8 +82,8 @@ describe("MemoryIndexStore", () => {
       intentToAdd: false,
     });
 
-    await store.write(index);
-    const read = await store.read();
+    await lastValueFrom(store.write(index));
+    const read = await lastValueFrom(store.read());
 
     expect(read.has("a.txt")).toBe(true);
   });
@@ -91,17 +92,17 @@ describe("MemoryIndexStore", () => {
 describe("MemoryWorkspaceBackend", () => {
   test("writes and reads files", async () => {
     const workspace = new MemoryWorkspaceBackend();
-    await workspace.writeFile("a.txt", new TextEncoder().encode("hello"));
+    await lastValueFrom(workspace.writeFile("a.txt", new TextEncoder().encode("hello")));
 
-    const content = new TextDecoder().decode(await workspace.readFile("a.txt"));
+    const content = new TextDecoder().decode(await lastValueFrom(workspace.readFile("a.txt")));
     expect(content).toBe("hello");
   });
 
   test("lists files", async () => {
     const workspace = new MemoryWorkspaceBackend();
-    await workspace.writeFile("b.txt", new TextEncoder().encode("b"));
-    await workspace.writeFile("a.txt", new TextEncoder().encode("a"));
+    await lastValueFrom(workspace.writeFile("b.txt", new TextEncoder().encode("b")));
+    await lastValueFrom(workspace.writeFile("a.txt", new TextEncoder().encode("a")));
 
-    expect(await workspace.listFiles()).toEqual(["a.txt", "b.txt"]);
+    expect(await lastValueFrom(workspace.listFiles())).toEqual(["a.txt", "b.txt"]);
   });
 });
