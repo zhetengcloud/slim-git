@@ -237,11 +237,22 @@ export interface Remote {
   readonly url: string;
 }
 
-/** Result of a successful fast-forward merge. */
-export interface MergeResult {
+/** Result of a successful merge. */
+export interface MergeSuccessResult {
   readonly merged: true;
   readonly commitOid: Oid;
 }
+
+/** A single path that could not be merged automatically. */
+export interface MergeConflict {
+  readonly path: string;
+  readonly content: Uint8Array;
+}
+
+/** Result of a merge: either a success or a list of conflicts. */
+export type MergeResult =
+  | MergeSuccessResult
+  | { readonly merged: false; readonly conflicts: readonly MergeConflict[] };
 
 /** Result of a fetch operation. */
 export interface FetchResult {
