@@ -101,7 +101,7 @@ Optional round-trip tests against canonical `git` are skipped automatically when
 ├────────────────────────────────────┤
 │  Transport                         │
 │  - MemoryTransport (testing)       │
-│  - SmartHttpTransport (planned)    │
+│  - SmartHttpTransport (today)      │
 └────────────────────────────────────┘
 ```
 
@@ -116,7 +116,8 @@ Phases follow [`plan.md`](./plan.md):
 - [x] Phase 4 — Remotes (smart HTTP fetch/push foundation)
 - [x] Phase 5 — Merge (fast-forward + three-way conflict markers) and `.gitignore`
 - [x] Phase 6 — Polish, docs, type consistency, canonical Git round-trip tests
-- [ ] Phase 7 — Optional TypeORM SQL acceleration
+- [x] Phase 7 — Canonical Smart HTTP transport (fetch/push against real Git servers)
+- [ ] Phase 8 — Optional TypeORM SQL acceleration
 
 ## Design principles
 
