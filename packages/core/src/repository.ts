@@ -37,7 +37,7 @@ import type { TreeEntryMap } from "./tree-utils.js";
 import { findInTree$, flattenTree$ } from "./tree-utils.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
 import { diffHeadRef, diffIndexHead, diffWorktreeIndex } from "./repository-diff.js";
-import { fastForwardMerge } from "./repository-merge.js";
+import { fastForwardMerge, merge, type MergeOptions } from "./repository-merge.js";
 import { addRemote, listRemotes, removeRemote } from "./repository-remotes.js";
 import { fetch, pull, push, type FetchOptions } from "./repository-fetch.js";
 import type { Transport } from "./transport.js";
@@ -725,6 +725,11 @@ export class Repository {
   /** Performs a fast-forward merge of the current branch to `target`. */
   fastForwardMerge(target: string): Observable<MergeResult> {
     return fastForwardMerge(this, target);
+  }
+
+  /** Merges `target` into HEAD, fast-forwarding or creating a merge commit. */
+  merge(target: string, options: MergeOptions): Observable<MergeResult> {
+    return merge(this, target, options);
   }
 
   /** Fetches a ref from a remote and stores it as a remote-tracking ref. */
