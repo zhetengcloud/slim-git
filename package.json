@@ -1,21 +1,19 @@
 {
-  "name": "slim-git",
-  "module": "index.ts",
-  "type": "module",
+  "name": "slim-git-workspace",
   "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/@slim-git/*",
+    "packages/slim-git"
+  ],
   "scripts": {
     "test": "bun test",
-    "lint": "bunx oxlint@latest",
-    "typecheck": "bun tsc --noEmit"
-  },
-  "dependencies": {
-    "rxjs": "^7.8.1"
+    "lint": "bun x oxlint@latest",
+    "typecheck": "bun tsc --build"
   },
   "devDependencies": {
     "@types/bun": "latest",
-    "oxlint": "latest"
-  },
-  "peerDependencies": {
+    "oxlint": "latest",
     "typescript": "^5"
   }
 }
