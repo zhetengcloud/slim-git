@@ -12,8 +12,10 @@ import type {
   FileDiff,
   IndexEntry,
   LogOptions,
+  MergeResult,
   Oid,
   Person,
+  Remote,
   RemoveResult,
   RestoreResult,
   Status,
@@ -22,6 +24,7 @@ import type {
 import { ConflictError, NotFoundError, UnsupportedError } from "@slim-git/types";
 import type { StorageBackend } from "./backend.js";
 import { CommitBuilder } from "./commit-builder.js";
+import type { Config } from "./config.js";
 import { unifiedDiff } from "./diff.js";
 import { parseCommit$ } from "./commit-parser.js";
 import { DefaultHash, type HashAlgorithm } from "./hash.js";
@@ -38,6 +41,7 @@ import {
   distinct,
   expand,
   filter,
+  first,
   forkJoin,
   from,
   map,
@@ -53,6 +57,7 @@ export interface RepositoryOptions {
   readonly refs?: RefStore;
   readonly index?: IndexStore;
   readonly workspace?: WorkspaceBackend;
+  readonly config?: Config;
 }
 
 /** Options used when creating or amending a commit. */
@@ -119,7 +124,6 @@ interface TreeEntryMap {
  */
 const parseTreeEntries = (content: Uint8Array): Map<string, TreeEntryMap> => {
   const entries = new Map<string, TreeEntryMap>();
-  const text = new TextDecoder().decode(content);
   let position = 0;
 
   while (position < content.length) {
@@ -127,8 +131,9 @@ const parseTreeEntries = (content: Uint8Array): Map<string, TreeEntryMap> => {
     const nullIndex = content.indexOf(0x00, spaceIndex + 1);
     if (spaceIndex === -1 || nullIndex === -1) break;
 
-    const mode = Number.parseInt(text.slice(position, spaceIndex), 8);
-    const name = text.slice(spaceIndex + 1, nullIndex);
+    const modeText = new TextDecoder().decode(content.slice(position, spaceIndex));
+    const mode = Number.parseInt(modeText, 8);
+    const name = new TextDecoder().decode(content.slice(spaceIndex + 1, nullIndex));
     const oidStart = nullIndex + 1;
     const oidEnd = oidStart + 20;
     const oidBytes = content.slice(oidStart, oidEnd);
@@ -216,6 +221,7 @@ export class Repository {
   readonly refs: RefStore;
   readonly indexStore: IndexStore;
   readonly workspace: WorkspaceBackend;
+  readonly config: Config;
 
   private constructor(
     readonly backend: StorageBackend,
@@ -223,11 +229,13 @@ export class Repository {
     refs: RefStore,
     indexStore: IndexStore,
     workspace: WorkspaceBackend,
+    config: Config,
   ) {
     this.objectStore = new ObjectStore(backend, hashAlgorithm);
     this.refs = refs;
     this.indexStore = indexStore;
     this.workspace = workspace;
+    this.config = config;
   }
 
   /** Creates a fresh repository instance backed by the given storage backend. */
@@ -253,6 +261,12 @@ export class Repository {
           removeFile: (path) => of({ path }),
           listFiles: () => of([]),
           exists: () => of(false),
+        },
+        options.config ?? {
+          get: () => of(undefined),
+          set: () => of(undefined),
+          remove: () => of(undefined),
+          list: () => of([]),
         },
       ),
     );
@@ -463,12 +477,7 @@ export class Repository {
         ),
       ),
       concatMap((builder) => builder.build(this.objectStore)),
-      concatMap((commitOid) =>
-        this.refs
-          .write("HEAD", commitOid)
-          .pipe(concatMap(() => this.indexStore.write(Index.empty())))
-          .pipe(map(() => commitOid)),
-      ),
+      concatMap((commitOid) => this.updateHeadRef$(commitOid)),
     );
   }
 
@@ -494,7 +503,27 @@ export class Repository {
               .message(options.message);
             return builder.build(this.objectStore);
           }),
-          concatMap((commitOid) => this.refs.write("HEAD", commitOid).pipe(map(() => commitOid))),
+          concatMap((commitOid) => this.updateHeadRef$(commitOid)),
+        );
+      }),
+    );
+  }
+
+  /**
+   * Moves HEAD to `commitOid`. If HEAD is a symbolic ref to a branch, the branch
+   * is updated and HEAD remains symbolic.
+   */
+  private updateHeadRef$(commitOid: Oid): Observable<Oid> {
+    return this.refs.read("HEAD").pipe(
+      concatMap((headValue) => {
+        const branchRef = headValue?.startsWith("ref: ")
+          ? headValue.slice("ref: ".length)
+          : undefined;
+        const targetRef$ = branchRef !== undefined ? of(branchRef) : of("HEAD");
+        return targetRef$.pipe(
+          concatMap((ref) => this.refs.write(ref, commitOid)),
+          concatMap(() => this.indexStore.write(Index.empty())),
+          map(() => commitOid),
         );
       }),
     );
@@ -767,6 +796,125 @@ export class Repository {
   /** Deletes a lightweight tag. */
   deleteTag(name: string): Observable<DeleteTagResult> {
     return this.refs.delete(`refs/tags/${name}`).pipe(map(() => ({ name })));
+  }
+
+  /** Adds a remote repository. */
+  addRemote(name: string, url: string): Observable<Remote> {
+    return this.config
+      .set("remote", `${name}.url`, url)
+      .pipe(map(() => ({ name, url })));
+  }
+
+  /** Removes a remote repository and its configuration. */
+  removeRemote(name: string): Observable<void> {
+    return this.config.list("remote").pipe(
+      concatMap((entries) =>
+        forkJoin(
+          entries
+            .filter(([key]) => key.startsWith(`${name}.`))
+            .map(([key]) => this.config.remove("remote", key)),
+        ).pipe(defaultIfEmpty([])),
+      ),
+      map(() => undefined),
+    );
+  }
+
+  /** Lists all configured remotes sorted by name. */
+  listRemotes(): Observable<Remote[]> {
+    return this.config.list("remote").pipe(
+      map((entries) => {
+        const urls = new Map<string, string>();
+        for (const [key, value] of entries) {
+          const dotIndex = key.indexOf(".");
+          if (dotIndex === -1) continue;
+          const name = key.slice(0, dotIndex);
+          const property = key.slice(dotIndex + 1);
+          if (property === "url") {
+            urls.set(name, value);
+          }
+        }
+        return Array.from(urls.entries())
+          .map(([name, url]) => ({ name, url }))
+          .sort((a, b) => a.name.localeCompare(b.name));
+      }),
+    );
+  }
+
+  /** Performs a fast-forward merge of the current branch to `target`. */
+  fastForwardMerge(target: string): Observable<MergeResult> {
+    return combineLatest([this.refs.read("HEAD"), this.resolveRef(target)]).pipe(
+      concatMap(([headValue, targetOid]): Observable<MergeResult> => {
+        if (headValue === undefined) {
+          return throwError(() => new NotFoundError("HEAD")) as Observable<MergeResult>;
+        }
+        if (targetOid === undefined) {
+          return throwError(() => new NotFoundError(target)) as Observable<MergeResult>;
+        }
+
+        const headRef = headValue;
+        const newOid = targetOid;
+
+        const headOid$ = (headRef.startsWith("ref: ")
+          ? this.resolveRef(headRef.slice("ref: ".length))
+          : of(headRef)) as Observable<string | undefined>;
+
+        return headOid$.pipe(
+          concatMap((headOid): Observable<MergeResult> => {
+            if (headOid === undefined) {
+              return throwError(() => new NotFoundError(headRef)) as Observable<MergeResult>;
+            }
+            const currentOid = headOid;
+            if (currentOid === newOid) {
+              return of({ merged: true as const, commitOid: newOid as Oid });
+            }
+            return this.isAncestor$(currentOid as string, newOid as string).pipe(
+              concatMap((isAncestor): Observable<MergeResult> => {
+                if (!isAncestor) {
+                  return throwError(
+                    () => new UnsupportedError("Cannot fast-forward: branches have diverged"),
+                  ) as Observable<MergeResult>;
+                }
+                return this.applyCommit$(newOid as Oid).pipe(
+                  concatMap((): Observable<MergeResult> => {
+                    const headUpdate$ = headRef.startsWith("ref: ")
+                      ? this.refs.write(headRef.slice("ref: ".length), newOid)
+                      : this.refs.write("HEAD", newOid);
+                    return headUpdate$.pipe(
+                      map(() => ({ merged: true as const, commitOid: newOid as Oid })),
+                    );
+                  }),
+                );
+              }),
+            );
+          }),
+        );
+      }),
+    );
+  }
+
+  /** Checks whether `ancestor` is an ancestor of `descendant` (or the same commit). */
+  private isAncestor$(ancestor: string, descendant: string): Observable<boolean> {
+    if (ancestor === descendant) {
+      return of(true);
+    }
+
+    return this.log({ ref: descendant as Oid }).pipe(
+      map((commit) => commit.oid === ancestor),
+      filter((found) => found),
+      defaultIfEmpty(false),
+      first(),
+    );
+  }
+
+  /** Updates the workspace and index to match a commit's tree without moving HEAD. */
+  private applyCommit$(commitOid: Oid): Observable<void> {
+    return this.readCommitTree$(commitOid).pipe(
+      concatMap((treeOid) => flattenTree$(this.objectStore, treeOid)),
+      concatMap((treeEntries) => this.applyTreeToWorkspace$(treeEntries)),
+      concatMap((treeEntries) => this.buildIndexFromTree$(treeEntries)),
+      concatMap((index) => this.indexStore.write(index)),
+      map(() => undefined),
+    );
   }
 
   /** Builds a tree object from every entry in the index and returns its oid. */

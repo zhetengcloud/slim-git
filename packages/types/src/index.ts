@@ -230,3 +230,31 @@ export interface DiffLine {
   readonly type: "context" | "added" | "removed";
   readonly text: string;
 }
+
+/** A configured remote repository. */
+export interface Remote {
+  readonly name: string;
+  readonly url: string;
+}
+
+/** Result of a successful fast-forward merge. */
+export interface MergeResult {
+  readonly merged: true;
+  readonly commitOid: Oid;
+}
+
+/** Result of a fetch operation. */
+export interface FetchResult {
+  readonly fetched: readonly { readonly ref: string; readonly oid: Oid }[];
+}
+
+/** Result of a push operation. */
+export interface PushResult {
+  readonly pushed: readonly { readonly ref: string; readonly oid: Oid; readonly accepted: boolean }[];
+}
+
+/** Result of a pull operation. */
+export interface PullResult {
+  readonly fetch: FetchResult;
+  readonly merge: MergeResult;
+}

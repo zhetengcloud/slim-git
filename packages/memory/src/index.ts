@@ -1,4 +1,5 @@
 import type {
+  Config,
   GitObject,
   IndexStore,
   Oid,
@@ -123,11 +124,40 @@ export class MemoryWorkspaceBackend implements WorkspaceBackend {
   }
 }
 
+/** In-memory implementation of `Config` backed by a `Map<string, string>`. */
+export class MemoryConfig implements Config {
+  private readonly entries = new Map<string, string>();
+
+  get(section: string, key: string): Observable<string | undefined> {
+    return of(this.entries.get(`${section}.${key}`));
+  }
+
+  set(section: string, key: string, value: string): Observable<void> {
+    this.entries.set(`${section}.${key}`, value);
+    return of(undefined);
+  }
+
+  remove(section: string, key: string): Observable<void> {
+    this.entries.delete(`${section}.${key}`);
+    return of(undefined);
+  }
+
+  list(section: string): Observable<readonly [string, string][]> {
+    const prefix = `${section}.`;
+    const result: [string, string][] = Array.from(this.entries.entries())
+      .filter(([name]) => name.startsWith(prefix))
+      .map(([name, value]): [string, string] => [name.slice(prefix.length), value])
+      .sort((a, b) => a[0].localeCompare(b[0]));
+    return of(result as readonly [string, string][]);
+  }
+}
+
 /** Options for creating an in-memory repository. */
 export interface MemoryRepositoryOptions extends RepositoryOptions {
   readonly refs?: RefStore;
   readonly index?: IndexStore;
   readonly workspace?: WorkspaceBackend;
+  readonly config?: Config;
 }
 
 /**
@@ -142,4 +172,5 @@ export const createMemoryRepository = (
     refs: options.refs ?? new MemoryRefStore(),
     index: options.index ?? new MemoryIndexStore(),
     workspace: options.workspace ?? new MemoryWorkspaceBackend(),
+    config: options.config ?? new MemoryConfig(),
   });
