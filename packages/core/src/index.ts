@@ -20,6 +20,8 @@ export * from "./repository.js";
 export * from "./repository-diff.js";
 export * from "./repository-merge.js";
 export * from "./repository-remotes.js";
+export * from "./repository-fetch.js";
+export * from "./transport.js";
 export * from "./tree-builder.js";
 export * from "./tree-utils.js";
 export * from "./workspace-backend.js";

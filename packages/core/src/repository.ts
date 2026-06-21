@@ -9,11 +9,13 @@ import type {
   DeleteTagResult,
   DestroyResult,
   Diff,
+  FetchResult,
   IndexEntry,
   LogOptions,
   MergeResult,
   Oid,
   Person,
+  PushResult,
   Remote,
   RemoveResult,
   RestoreResult,
@@ -34,13 +36,11 @@ import { TreeBuilder } from "./tree-builder.js";
 import type { TreeEntryMap } from "./tree-utils.js";
 import { findInTree$, flattenTree$ } from "./tree-utils.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
-import {
-  diffHeadRef,
-  diffIndexHead,
-  diffWorktreeIndex,
-} from "./repository-diff.js";
+import { diffHeadRef, diffIndexHead, diffWorktreeIndex } from "./repository-diff.js";
 import { fastForwardMerge } from "./repository-merge.js";
 import { addRemote, listRemotes, removeRemote } from "./repository-remotes.js";
+import { fetch, pull, push, type FetchOptions } from "./repository-fetch.js";
+import type { Transport } from "./transport.js";
 import {
   combineLatest,
   concatMap,
@@ -725,6 +725,25 @@ export class Repository {
   /** Performs a fast-forward merge of the current branch to `target`. */
   fastForwardMerge(target: string): Observable<MergeResult> {
     return fastForwardMerge(this, target);
+  }
+
+  /** Fetches a ref from a remote and stores it as a remote-tracking ref. */
+  fetch(remoteName: string, transport: Transport, options?: FetchOptions): Observable<FetchResult> {
+    return fetch(this, remoteName, transport, options);
+  }
+
+  /** Pushes the current branch to a remote. */
+  push(remoteName: string, transport: Transport, options?: FetchOptions): Observable<PushResult> {
+    return push(this, remoteName, transport, options);
+  }
+
+  /** Fetches and then fast-forwards the current branch. */
+  pull(
+    remoteName: string,
+    transport: Transport,
+    options?: FetchOptions,
+  ): Observable<{ readonly fetch: FetchResult; readonly merge: MergeResult }> {
+    return pull(this, remoteName, transport, options);
   }
 
   /** Updates the workspace and index to match a commit's tree without moving HEAD. */
