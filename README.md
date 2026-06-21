@@ -14,6 +14,7 @@ This repository is a Bun workspace monorepo:
 packages/
 ├── slim-git          # Main SDK entry point
 ├── @slim-git/core    # Object store, refs, index, config, repository, merge
+├── @slim-git/fs      # Node.js filesystem backend
 ├── @slim-git/memory  # In-memory storage backend and transport
 ├── @slim-git/http    # Smart HTTP transport foundation (ref discovery, pkt-line)
 └── @slim-git/types   # Shared TypeScript types and errors
@@ -53,6 +54,38 @@ const oid = await lastValueFrom(
 
 console.log("Created commit:", oid);
 ```
+
+## Node filesystem backend
+
+For real repositories on disk, use `initNodeRepository` or `openNodeRepository` from `slim-git`:
+
+```ts
+import { lastValueFrom } from "rxjs";
+import { initNodeRepository } from "slim-git";
+
+const repo = await lastValueFrom(initNodeRepository("./my-repo"));
+
+await lastValueFrom(
+  repo.workspace.writeFile("hello.txt", new TextEncoder().encode("Hello from Node FS!")),
+);
+await lastValueFrom(repo.add(["hello.txt"]));
+
+const oid = await lastValueFrom(
+  repo.commit({
+    message: "Initial commit",
+    author: {
+      name: "Developer",
+      email: "dev@example.com",
+      timestamp: new Date(),
+      timezoneOffsetMinutes: 0,
+    },
+  }),
+);
+
+console.log("Created commit:", oid);
+```
+
+The Node backend stores objects, refs, index, and config in the standard `.git` layout, so the repository is also readable by canonical Git.
 
 ## Supported operations
 
@@ -96,8 +129,8 @@ Optional round-trip tests against canonical `git` are skipped automatically when
 │  Object Store + Ref/Index Stores   │
 ├────────────────────────────────────┤
 │  Storage Backend                   │
-│  - MemoryBackend (today)           │
-│  - NodeBackend (planned)           │
+│  - MemoryBackend (testing)         │
+│  - NodeBackend (today)             │
 ├────────────────────────────────────┤
 │  Transport                         │
 │  - MemoryTransport (testing)       │
@@ -117,7 +150,8 @@ Phases follow [`plan.md`](./plan.md):
 - [x] Phase 5 — Merge (fast-forward + three-way conflict markers) and `.gitignore`
 - [x] Phase 6 — Polish, docs, type consistency, canonical Git round-trip tests
 - [x] Phase 7 — Canonical Smart HTTP transport (fetch/push against real Git servers)
-- [ ] Phase 8 — Optional TypeORM SQL acceleration
+- [x] Phase 9 — Node.js filesystem backend (`@slim-git/fs`)
+- [ ] Phase 8 — Optional TypeORM SQL acceleration (on hold)
 
 ## Design principles
 
