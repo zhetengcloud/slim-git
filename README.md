@@ -64,6 +64,7 @@ console.log("Created commit:", oid);
 - Branches: `createBranch`, `listBranches`, `deleteBranch`, `getCurrentBranch`
 - Tags: `createTag`, `listTags`, `deleteTag`
 - Workspace switching: `checkout`
+- Diff: `diffWorktreeIndex`, `diffIndexHead`, `diffHeadRef`
 
 ## Scripts
 
@@ -100,7 +101,7 @@ Phases follow [`plan.md`](./plan.md):
 - [x] Phase 0 — Core object model (memory backend)
 - [x] Phase 1 — Staging & commit
 - [x] Phase 2 — History & branches
-- [ ] Phase 3 — Diff
+- [x] Phase 3 — Diff
 - [ ] Phase 4 — Remotes (smart HTTP fetch/push)
 - [ ] Phase 5 — Merge (fast-forward + conflict markers)
 - [ ] Phase 6 — Polish, docs, benchmarks

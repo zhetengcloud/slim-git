@@ -203,3 +203,30 @@ export interface DeleteTagResult {
 export interface DestroyResult {
   readonly destroyed: true;
 }
+/** Result of a line-level diff between two trees. */
+export interface Diff {
+  readonly files: readonly FileDiff[];
+}
+
+/** Per-file diff result. */
+export interface FileDiff {
+  readonly path: string;
+  readonly status: "added" | "deleted" | "modified" | "renamed" | "unchanged";
+  readonly oldPath?: string;
+  readonly hunks: readonly Hunk[];
+}
+
+/** A single hunk inside a file diff. */
+export interface Hunk {
+  readonly oldStart: number;
+  readonly oldLines: number;
+  readonly newStart: number;
+  readonly newLines: number;
+  readonly lines: readonly DiffLine[];
+}
+
+/** A single line inside a diff hunk. */
+export interface DiffLine {
+  readonly type: "context" | "added" | "removed";
+  readonly text: string;
+}

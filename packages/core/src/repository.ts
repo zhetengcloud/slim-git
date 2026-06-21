@@ -8,6 +8,8 @@ import type {
   DeleteBranchResult,
   DeleteTagResult,
   DestroyResult,
+  Diff,
+  FileDiff,
   IndexEntry,
   LogOptions,
   Oid,
@@ -20,6 +22,7 @@ import type {
 import { ConflictError, NotFoundError, UnsupportedError } from "@slim-git/types";
 import type { StorageBackend } from "./backend.js";
 import { CommitBuilder } from "./commit-builder.js";
+import { unifiedDiff } from "./diff.js";
 import { parseCommit$ } from "./commit-parser.js";
 import { DefaultHash, type HashAlgorithm } from "./hash.js";
 import { Index } from "./index-model.js";
@@ -34,12 +37,14 @@ import {
   defaultIfEmpty,
   distinct,
   expand,
+  filter,
   forkJoin,
   from,
   map,
   of,
   type Observable,
   throwError,
+  toArray,
 } from "rxjs";
 
 /** Options used when initializing or opening a repository. */
@@ -191,14 +196,7 @@ const flattenTree$ = (
       return childTasks.length === 0
         ? of(new Map<string, TreeEntryMap>())
         : forkJoin(childTasks).pipe(
-            map((groups) =>
-              groups.reduce((map, group) => {
-                for (const [path, entry] of group) {
-                  map.set(path, entry);
-                }
-                return map;
-              }, new Map<string, TreeEntryMap>()),
-            ),
+            map((groups) => new Map(groups.flat())),
           );
     }),
   );
@@ -670,16 +668,14 @@ export class Repository {
           concatMap((treeEntries) => this.buildIndexFromTree$(treeEntries)),
           concatMap((index) => this.refs.write("HEAD", headValue).pipe(map(() => index))),
           concatMap((index) =>
-            this.indexStore
-              .write(index)
-              .pipe(
-                map(() => ({
-                  commitOid,
-                  branch: headValue.startsWith("ref: ")
-                    ? headValue.slice("ref: refs/heads/".length)
-                    : undefined,
-                })),
-              ),
+            this.indexStore.write(index).pipe(
+              map(() => ({
+                commitOid,
+                branch: headValue.startsWith("ref: ")
+                  ? headValue.slice("ref: refs/heads/".length)
+                  : undefined,
+              })),
+            ),
           ),
         ),
       ),
@@ -785,5 +781,124 @@ export class Repository {
   /** Releases any resources held by the repository. */
   destroy(): Observable<DestroyResult> {
     return of({ destroyed: true });
+  }
+
+  /** Computes a diff between the index and the working tree. */
+  diffWorktreeIndex(): Observable<Diff> {
+    return combineLatest([this.resolveTreeMap$("index"), this.resolveTreeMap$("worktree")]).pipe(
+      concatMap(([index, worktree]) => this.diffTreeMaps$(index, worktree)),
+      toArray(),
+      map((files) => ({ files })),
+    );
+  }
+
+  /** Computes a diff between HEAD and the index. */
+  diffIndexHead(): Observable<Diff> {
+    return combineLatest([this.resolveTreeMap$("head"), this.resolveTreeMap$("index")]).pipe(
+      concatMap(([head, index]) => this.diffTreeMaps$(head, index)),
+      toArray(),
+      map((files) => ({ files })),
+    );
+  }
+
+  /** Computes a diff between the given ref, branch, or oid and HEAD. */
+  diffHeadRef(ref: string): Observable<Diff> {
+    return combineLatest([this.resolveTreeMap$(ref), this.resolveTreeMap$("head")]).pipe(
+      concatMap(([other, head]) => this.diffTreeMaps$(other, head)),
+      toArray(),
+      map((files) => ({ files })),
+    );
+  }
+
+  /**
+   * Resolves a tree source to a flattened map of path → { oid, mode }.
+   * Sources can be "worktree", "index", "head", or any ref/branch/oid string.
+   */
+  private resolveTreeMap$(
+    source: "worktree" | "index" | "head" | string,
+  ): Observable<Map<string, TreeEntryMap>> {
+    if (source === "worktree") {
+      return this.flattenWorktree$();
+    }
+
+    if (source === "index") {
+      return this.indexStore.read().pipe(map((index) => this.indexToTreeMap(index)));
+    }
+
+    const oid$ = source === "head" ? this.resolveRef("HEAD") : this.resolveRef(source);
+    return oid$.pipe(
+      concatMap((oid) => {
+        if (oid === undefined) {
+          return throwError(() => new NotFoundError(source));
+        }
+        return this.readCommitTree$(oid).pipe(
+          concatMap((treeOid) => flattenTree$(this.objectStore, treeOid)),
+        );
+      }),
+    );
+  }
+
+  /** Builds a flattened map from the current workspace files. */
+  private flattenWorktree$(): Observable<Map<string, TreeEntryMap>> {
+    return this.workspace.listFiles().pipe(
+      concatMap((files) =>
+        forkJoin(files.map((path) => this.hashWorktreeFile$(path))).pipe(defaultIfEmpty([])),
+      ),
+      map((entries) => new Map(entries)),
+    );
+  }
+
+  /** Reads a workspace file and persists it as a blob so it has an oid. */
+  private hashWorktreeFile$(path: string): Observable<[string, TreeEntryMap]> {
+    return this.workspace.readFile(path).pipe(
+      concatMap((content) => this.objectStore.write("blob", content)),
+      map((blob) => [path, { oid: blob.oid, mode: DefaultFileMode }]),
+    );
+  }
+
+  /** Converts an index into a flattened path → { oid, mode } map. */
+  private indexToTreeMap(index: Index): Map<string, TreeEntryMap> {
+    return new Map(
+      index.toArray().map((entry) => [entry.path, { oid: entry.oid, mode: entry.mode }]),
+    );
+  }
+
+  /** Compares an old tree map to a new tree map and emits one FileDiff at a time. */
+  private diffTreeMaps$(
+    oldMap: Map<string, TreeEntryMap>,
+    newMap: Map<string, TreeEntryMap>,
+  ): Observable<FileDiff> {
+    const paths = Array.from(new Set([...oldMap.keys(), ...newMap.keys()])).sort();
+
+    return from(paths).pipe(
+      concatMap((path) => {
+        const oldEntry = oldMap.get(path);
+        const newEntry = newMap.get(path);
+
+        if (oldEntry === undefined) {
+          return of({ path, status: "added" as const, hunks: [] });
+        }
+
+        if (newEntry === undefined) {
+          return of({ path, status: "deleted" as const, hunks: [] });
+        }
+
+        if (oldEntry.oid === newEntry.oid) {
+          return of({ path, status: "unchanged" as const, hunks: [] });
+        }
+
+        return combineLatest([
+          this.objectStore.read(oldEntry.oid),
+          this.objectStore.read(newEntry.oid),
+        ]).pipe(
+          map(([oldObject, newObject]) => ({
+            path,
+            status: "modified" as const,
+            hunks: unifiedDiff(oldObject.content, newObject.content),
+          })),
+        );
+      }),
+      filter((file) => file.status !== "unchanged"),
+    );
   }
 }

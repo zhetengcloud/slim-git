@@ -1,5 +1,5 @@
 import type { Oid, TreeEntry } from "@slim-git/types";
-import { concatMap, forkJoin, map, type Observable, of } from "rxjs";
+import { concatMap, from, map, toArray, type Observable } from "rxjs";
 import type { ObjectStore } from "./object-store.js";
 
 /** Splits a file path into its directory segments. */
@@ -84,26 +84,30 @@ const insertIntoNode = (
 };
 
 /**
- * Recursively writes tree objects bottom-up.
- * Each directory node becomes a tree object; its oid is inserted into its parent.
+ * Recursively writes a tree node and its descendants bottom-up.
+ * Children are written first, then their oids are assembled into the parent tree.
  */
 const buildNode$ = (node: TreeNode, store: ObjectStore): Observable<Oid> => {
-  const childEntries$: Observable<TreeEntry[]> =
-    node.children.size === 0
-      ? of([])
-      : forkJoin(
-          Array.from(node.children.entries()).map(([name, child]) =>
-            buildNode$(child, store).pipe(map((oid) => ({ mode: 0o040000, name, oid }))),
-          ),
-        );
-
-  return childEntries$.pipe(
-    map((childEntries) => [...node.entries, ...childEntries]),
-    map((allEntries) => buildTreeBytes(allEntries)),
-    concatMap((bytes) => store.write("tree", bytes)),
-    map((written) => written.oid),
+  return from(node.children.entries()).pipe(
+    concatMap(([name, child]) =>
+      buildNode$(child, store).pipe(map((oid) => ({ name, oid }))),
+    ),
+    toArray(),
+    concatMap((childResults) => {
+      const childEntries = childResults.map(({ name, oid }) => ({
+        mode: 0o040000,
+        name,
+        oid,
+      }));
+      const allEntries = [...node.entries, ...childEntries];
+      return store.write("tree", buildTreeBytes(allEntries)).pipe(
+        map((written) => written.oid),
+      );
+    }),
   );
 };
+
+
 
 /**
  * Fluent builder that turns a flat list of file paths into nested Git tree objects.
