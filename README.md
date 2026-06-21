@@ -2,6 +2,10 @@
 
 A lightweight, embeddable **Git SDK** written in TypeScript for Node.js 18+. It is **SDK-first**, not CLI-first: applications import a programmatic API and work with repository objects directly.
 
+## What slim-git is not
+
+slim-git is intentionally small. It is **not** a full Git replacement, a command-line interface, or a tool for advanced workflows like interactive rebase, submodules, or signed commits. It targets the common subset of Git operations needed by embedded tools, tests, and lightweight applications. We chose this scope to keep the API simple, the dependency tree minimal, and the core easy to reason about.
+
 ## Packages
 
 This repository is a Bun workspace monorepo:
