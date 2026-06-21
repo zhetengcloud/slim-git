@@ -11,7 +11,7 @@
         "typescript": "^5",
       },
     },
-    "packages/@slim-git/core": {
+    "packages/core": {
       "name": "@slim-git/core",
       "version": "0.1.0",
       "dependencies": {
@@ -24,20 +24,13 @@
         "typescript": "^5",
       },
     },
-    "packages/@slim-git/memory": {
+    "packages/memory": {
       "name": "@slim-git/memory",
       "version": "0.1.0",
       "dependencies": {
         "@slim-git/core": "workspace:*",
         "@slim-git/types": "workspace:*",
       },
-      "peerDependencies": {
-        "typescript": "^5",
-      },
-    },
-    "packages/@slim-git/types": {
-      "name": "@slim-git/types",
-      "version": "0.1.0",
       "peerDependencies": {
         "typescript": "^5",
       },
@@ -50,6 +43,13 @@
         "@slim-git/memory": "workspace:*",
         "@slim-git/types": "workspace:*",
       },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
+    "packages/types": {
+      "name": "@slim-git/types",
+      "version": "0.1.0",
       "peerDependencies": {
         "typescript": "^5",
       },
@@ -132,11 +132,11 @@
 
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.70.0", "https://registry.npmmirror.com/@oxlint/binding-win32-x64-msvc/-/binding-win32-x64-msvc-1.70.0.tgz", { "os": "win32", "cpu": "x64" }, "sha512-ptOlKwCz7n4AKs5VweMqG6DAg677FmKOK+vBkkL9DMNgFATIQ+upqUYBTOEwRQyRAx1ncGlPlXleV2hIcm3z4g=="],
 
-    "@slim-git/core": ["@slim-git/core@workspace:packages/@slim-git/core"],
+    "@slim-git/core": ["@slim-git/core@workspace:packages/core"],
 
-    "@slim-git/memory": ["@slim-git/memory@workspace:packages/@slim-git/memory"],
+    "@slim-git/memory": ["@slim-git/memory@workspace:packages/memory"],
 
-    "@slim-git/types": ["@slim-git/types@workspace:packages/@slim-git/types"],
+    "@slim-git/types": ["@slim-git/types@workspace:packages/types"],
 
     "@types/bun": ["@types/bun@1.3.14", "https://registry.npmmirror.com/@types/bun/-/bun-1.3.14.tgz", { "dependencies": { "bun-types": "1.3.14" } }, "sha512-h1hFqFVcvAvD9j9K7ZW7vd82aSA+rTdznZa+5bwvCwqSB1jmmfLcbIWhOLx1/+boy/xmjgCs/OMUL8hRJSmnPw=="],
 

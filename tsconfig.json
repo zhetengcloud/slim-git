@@ -14,9 +14,9 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "paths": {
-      "@slim-git/types": ["./packages/@slim-git/types/src/index.ts"],
-      "@slim-git/core": ["./packages/@slim-git/core/src/index.ts"],
-      "@slim-git/memory": ["./packages/@slim-git/memory/src/index.ts"],
+      "@slim-git/types": ["./packages/types/src/index.ts"],
+      "@slim-git/core": ["./packages/core/src/index.ts"],
+      "@slim-git/memory": ["./packages/memory/src/index.ts"],
       "slim-git": ["./packages/slim-git/src/index.ts"]
     }
   },

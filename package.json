@@ -2,8 +2,7 @@
   "name": "slim-git-workspace",
   "private": true,
   "workspaces": [
-    "packages/@slim-git/*",
-    "packages/slim-git"
+    "packages/*"
   ],
   "type": "module",
   "scripts": {
