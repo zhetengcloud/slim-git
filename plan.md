@@ -199,13 +199,22 @@ Packfiles are read and written lazily. Loose objects are the default for simplic
 - Fetch and push against real Git servers (GitHub, GitLab, self-hosted).
 - `side-band-64k` response parsing and report-status handling.
 
-### Phase 8 — SQL Acceleration (Optional)
+### Phase 8 — SQL Acceleration (Optional, On Hold)
 
 - TypeORM entity layer.
 - Write-through synchronization.
 - Reindex from `.git` on open.
 - Cached `status`, `log`, and `exists` queries.
 - Validate PostgreSQL, MySQL, and SQLite drivers.
+
+**Status:** on hold. The filesystem backend in `@slim-git/fs` is the current priority for real-world persistence.
+
+### Phase 9 — Node Filesystem Backend (Active)
+
+- Loose-object storage on disk (`@slim-git/fs`).
+- Ref, index, workspace, and config persistence.
+- `initNodeRepository(path)` and `openNodeRepository(path)` factories.
+- Integration tests round-tripping with canonical Git.
 
 ## 10. Package Layout (Monorepo)
 

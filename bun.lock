@@ -25,6 +25,18 @@
         "typescript": "^5",
       },
     },
+    "packages/fs": {
+      "name": "@slim-git/fs",
+      "version": "0.1.0",
+      "dependencies": {
+        "@slim-git/core": "workspace:*",
+        "@slim-git/types": "workspace:*",
+        "rxjs": "^7.8.1",
+      },
+      "peerDependencies": {
+        "typescript": "^5",
+      },
+    },
     "packages/http": {
       "name": "@slim-git/http",
       "version": "0.1.0",
@@ -54,6 +66,7 @@
       "version": "0.1.0",
       "dependencies": {
         "@slim-git/core": "workspace:*",
+        "@slim-git/fs": "workspace:*",
         "@slim-git/http": "workspace:*",
         "@slim-git/memory": "workspace:*",
         "@slim-git/types": "workspace:*",
@@ -149,6 +162,8 @@
     "@oxlint/binding-win32-x64-msvc": ["@oxlint/binding-win32-x64-msvc@1.70.0", "https://registry.npmmirror.com/@oxlint/binding-win32-x64-msvc/-/binding-win32-x64-msvc-1.70.0.tgz", { "os": "win32", "cpu": "x64" }, "sha512-ptOlKwCz7n4AKs5VweMqG6DAg677FmKOK+vBkkL9DMNgFATIQ+upqUYBTOEwRQyRAx1ncGlPlXleV2hIcm3z4g=="],
 
     "@slim-git/core": ["@slim-git/core@workspace:packages/core"],
+
+    "@slim-git/fs": ["@slim-git/fs@workspace:packages/fs"],
 
     "@slim-git/http": ["@slim-git/http@workspace:packages/http"],
 
