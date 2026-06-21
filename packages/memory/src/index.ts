@@ -174,3 +174,5 @@ export const createMemoryRepository = (
     workspace: options.workspace ?? new MemoryWorkspaceBackend(),
     config: options.config ?? new MemoryConfig(),
   });
+
+export * from "./transport.js";
