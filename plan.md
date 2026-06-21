@@ -189,9 +189,17 @@ Packfiles are read and written lazily. Loose objects are the default for simplic
 
 ### Phase 6 — Polish
 
-- TypeScript types, documentation, benchmarks against canonical Git.
+- TypeScript types and documentation.
+- Canonical Git round-trip tests.
 
-### Phase 7 — SQL Acceleration (Optional)
+### Phase 7 — Smart HTTP Transport
+
+- Packfile encoder/decoder with delta support.
+- `SmartHttpTransport` implementing the core `Transport` interface.
+- Fetch and push against real Git servers (GitHub, GitLab, self-hosted).
+- `side-band-64k` response parsing and report-status handling.
+
+### Phase 8 — SQL Acceleration (Optional)
 
 - TypeORM entity layer.
 - Write-through synchronization.

@@ -33,8 +33,11 @@ export interface PushReport {
 export interface Transport {
   readonly name: string;
 
-  /** Discovers refs advertised by the remote. */
+  /** Discovers refs advertised by the remote for fetching. */
   discoverRefs(): Observable<readonly DiscoveredRef[]>;
+
+  /** Discovers refs advertised by the remote for pushing. */
+  discoverReceiveRefs(): Observable<readonly DiscoveredRef[]>;
 
   /**
    * Fetches objects reachable from `wants` that are not in `haves`.

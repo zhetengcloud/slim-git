@@ -144,11 +144,11 @@ export class MemoryConfig implements Config {
 
   list(section: string): Observable<readonly [string, string][]> {
     const prefix = `${section}.`;
-    const result: [string, string][] = Array.from(this.entries.entries())
+    const result: readonly [string, string][] = Array.from(this.entries.entries())
       .filter(([name]) => name.startsWith(prefix))
       .map(([name, value]): [string, string] => [name.slice(prefix.length), value])
       .sort((a, b) => a[0].localeCompare(b[0]));
-    return of(result as readonly [string, string][]);
+    return of(result);
   }
 }
 

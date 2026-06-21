@@ -87,6 +87,55 @@ export const decodePktLines = (
   return { lines, remainder: buffer.slice(position) };
 };
 
+/** Result of decoding a pkt-line stream into raw binary frames. */
+export interface DecodedPktFrames {
+  readonly frames: readonly Uint8Array[];
+  readonly remainder: Uint8Array;
+}
+
+/**
+ * Decodes pkt-line frames without interpreting payloads as text.
+ *
+ * This is required for side-band channels, where each frame carries a leading
+ * channel byte followed by binary data. Flush packets ("0000") are skipped.
+ */
+export const decodePktLineFrames = (
+  data: Uint8Array,
+  previousRemainder?: Uint8Array,
+): DecodedPktFrames => {
+  const buffer =
+    previousRemainder !== undefined ? concatUint8Arrays(previousRemainder, data) : data;
+
+  const frames: Uint8Array[] = [];
+  let position = 0;
+
+  while (position < buffer.length) {
+    if (position + 4 > buffer.length) {
+      break;
+    }
+
+    const lengthText = new TextDecoder().decode(buffer.slice(position, position + 4));
+    if (lengthText === "0000") {
+      position += 4;
+      continue;
+    }
+
+    const length = Number.parseInt(lengthText, 16);
+    if (Number.isNaN(length) || length < 4) {
+      throw new Error(`Invalid pkt-line length: ${lengthText}`);
+    }
+
+    if (position + length > buffer.length) {
+      break;
+    }
+
+    frames.push(buffer.slice(position + 4, position + length));
+    position += length;
+  }
+
+  return { frames, remainder: buffer.slice(position) };
+};
+
 const concatUint8Arrays = (a: Uint8Array, b: Uint8Array): Uint8Array => {
   const result = new Uint8Array(a.length + b.length);
   result.set(a);
