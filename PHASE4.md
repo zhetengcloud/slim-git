@@ -2,100 +2,64 @@
 
 ## Goal
 
-Add remote repository support to slim-git: manage remotes, fetch from and push to them over Smart HTTP, and implement `pull` as fetch plus a fast-forward merge.
+Add remote repository management and the `fetch`, `push`, and `pull` commands to slim-git through a backend-agnostic `Transport` abstraction.
 
 ## Packages affected
 
-- `packages/types` — `Remote`, `FetchResult`, `PushResult`, `PullResult`, and `MergeResult` types.
-- `packages/core` — config handling for remotes, `Repository` remote methods, fast-forward merge.
-- `packages/http` — Smart HTTP transport (`upload-pack` / `receive-pack` protocol).
-- `packages/memory` — optional in-memory HTTP transport shim for tests.
-- `packages/slim-git` — re-export new public APIs.
+- `packages/types` — `FetchResult`, `PushResult`, `MergeResult` already added.
+- `packages/core` — `Transport` interface, `DiscoveredRef`, `PushCommand`, `PushReport`, and `Repository.fetch`/`push`/`pull`.
+- `packages/memory` — `MemoryTransport` for fast, deterministic testing without network or packfiles.
+- `packages/http` — Smart HTTP ref discovery and request builders (packfile serialization deferred).
 
-## 1. Configuration and remote management
+## 1. Transport abstraction
 
-Add minimal `.git/config` support:
+Create `packages/core/src/transport.ts`:
 
-- `Config` interface in `@slim-git/core`:
-  - `get(section, key): string | undefined`
-  - `set(section, key, value): void`
-  - `remove(section, key): void`
-  - `list(section): [key, value][]`
-- Backed by the storage backend (initially in-memory; later persisted by Node FS backend).
+- `Transport` interface with:
+  - `name: string`
+  - `discoverRefs(): Observable<readonly DiscoveredRef[]>`
+  - `fetch(wants, haves): Observable<readonly GitObject[]>`
+  - `push(commands, objects): Observable<PushReport>`
+- `DiscoveredRef { readonly name: string; readonly oid: Oid }`
+- `PushCommand { readonly ref: string; readonly oldOid: Oid; readonly newOid: Oid }`
+- `PushReport { readonly accepted: readonly { readonly ref: string; readonly oid: Oid; readonly accepted: boolean }[] }`
 
-Add to `Repository`:
+The interface intentionally avoids packfiles for now. Concrete transports may implement object-level exchange (`MemoryTransport`) or add packfile encoding later (`SmartHttpTransport`).
 
-- `addRemote(name, url): Observable<Remote>` — stores `remote.<name>.url` in config.
-- `removeRemote(name): Observable<void>` — removes `remote.<name>.*` entries.
-- `listRemotes(): Observable<Remote[]>` — returns `{ name, url }` sorted by name.
+## 2. Repository fetch/push/pull
 
-## 2. Fast-forward merge
+Create `packages/core/src/repository-fetch.ts`:
 
-Implement a focused fast-forward merge helper used by `pull`:
+- `fetch(repo, remoteName, transport, options)` — discovers remote refs, fetches wanted objects, writes them to the local object store, and updates `refs/remotes/<remoteName>/<branch>`.
+- `push(repo, remoteName, transport, options)` — resolves the local branch, collects reachable objects, sends them with a push command, and updates the remote-tracking ref.
+- `pull(repo, remoteName, transport, options)` — runs `fetch` then `fastForwardMerge` from the remote-tracking ref.
+- `FetchOptions { readonly ref?: string }` — defaults to the current branch.
 
-- `fastForwardMerge(target: string): Observable<MergeResult>`
-  - Resolve `target` to a commit oid.
-  - Verify HEAD is an ancestor of `target` (no divergence).
-  - Move HEAD (and the current branch if not detached) to `target`.
-  - Update the index and working tree to the target tree.
-- Result type: `{ merged: true; commitOid: Oid }` or an explicit error.
+Wire the methods into `Repository` as `fetch`, `push`, and `pull`.
 
-Non-fast-forward merges (conflict markers, paused merge state) remain out of scope and will be handled in Phase 5.
+## 3. In-memory transport
 
-## 3. Smart HTTP transport
+Create `packages/memory/src/transport.ts`:
+
+- `MemoryTransport` implements `Transport` by connecting two `StorageBackend` instances directly.
+- `fetch` walks commit → tree → blob reachability from the wanted oids.
+- `push` writes objects to the remote backend and updates the provided ref map.
+
+Export it from `@slim-git/memory`.
+
+## 4. Smart HTTP transport (foundation)
 
 Create `packages/http`:
 
-- `SmartHttpTransport` interface or class with:
-  - `discoverRefs(url, service): Observable<RefDiscovery>` — performs `GET /info/refs?service=<service>`.
-  - `fetchPack(url, wants, haves): Observable<Uint8Array>` — POST to `/git-upload-pack`, returns packfile bytes.
-  - `pushPack(url, commands, packfile): Observable<PushReport>` — POST to `/git-receive-pack`.
-- Use the Git "pkt-line" format for request/response framing.
-- Implement side-band detection for progress/error streams.
+- `packages/http/src/pkt-line.ts` — pkt-line encoder/decoder.
+- `packages/http/src/smart-http.ts` — `SmartHttpTransport` with ref discovery parsing and request builders for `fetch-pack`/`push-pack`.
+- Actual POST handling and packfile serialization are deferred to a later phase.
 
-Out of scope for this phase: dumb HTTP, SSH, local protocol, proxy support, and packfile indexing (keep fetched objects as loose objects).
-
-## 4. Repository fetch/push/pull
-
-Add to `Repository`:
-
-- `fetch(remoteName, options?): Observable<FetchResult>`
-  - Discover refs from the remote.
-  - Download missing objects via `fetchPack`.
-  - Update `refs/remotes/<remote>/<ref>` refs in the local ref store.
-  - Return fetched branch/tag refs.
-- `push(remoteName, refspec?): Observable<PushResult>`
-  - Resolve local ref to oid.
-  - Discover remote refs, compute required objects, build a packfile.
-  - Send update commands and packfile via `pushPack`.
-  - Report accepted/rejected updates.
-- `pull(remoteName, refspec?): Observable<PullResult>`
-  - Fetch from remote.
-  - Fast-forward merge the current branch to the fetched ref.
-
-## 5. Packfile helpers (minimal)
-
-In `@slim-git/core`:
-
-- `PackfileBuilder` — builds a thin or full packfile from a list of objects.
-- `PackfileParser` — parses a fetched packfile and writes loose objects into the object store.
-
-For Phase 4, keep these minimal and synchronous where possible; full pack index and delta resolution optimization comes later.
-
-## 6. Tests
+## 5. Tests
 
 Add focused test files:
 
-- `packages/core/test/config.test.ts` — config get/set/remove/list.
-- `packages/core/test/repository-remotes.test.ts` — addRemote, removeRemote, listRemotes.
-- `packages/core/test/fast-forward-merge.test.ts` — fast-forward merge scenarios.
-- `packages/http/test/smart-http.test.ts` — pkt-line parsing, ref discovery request formatting.
-- `packages/core/test/repository-fetch.test.ts` and `repository-push.test.ts` — integration tests using a local HTTP test server or transport stub.
+- `packages/core/test/repository-fetch.test.ts` — fetch copies objects and writes remote-tracking refs; push updates remote refs; pull fast-forwards the current branch.
+- `packages/memory/src/transport.test.ts` — `MemoryTransport` ref discovery, fetch reachability, and push acceptance.
 
-## 7. Style & constraints
-
-- Bun, TypeScript strict, oxfmt/oxlint.
-- RxJS for async orchestration.
-- Keep the transport protocol isolated in `packages/http`; do not leak HTTP-specific code into `@slim-git/core`.
-- Pure functions for packfile/pkt-line formatting.
-- SOLID: small focused functions, dependency injection, interface segregation.
+Run `bun test`, `bun tsc --noEmit`, and `bunx oxlint@latest` after changes.
