@@ -13,6 +13,7 @@ export * from "./diff.js";
 
 export * from "./hash.js";
 export * from "./index-model.js";
+export * from "./merge-base.js";
 export * from "./index-store.js";
 export * from "./object-store.js";
 export * from "./ref-store.js";
