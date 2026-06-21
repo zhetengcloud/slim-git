@@ -236,6 +236,8 @@ export interface DiffLine {
 export interface Remote {
   readonly name: string;
   readonly url: string;
+  /** Optional URL used only for pushing (Git's `remote.<name>.pushurl`). */
+  readonly pushUrl?: string;
 }
 
 /** Result of a successful merge. */

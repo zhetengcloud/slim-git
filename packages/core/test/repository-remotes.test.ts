@@ -12,7 +12,7 @@ describe("Repository remotes", () => {
     expect(remotes).toEqual([{ name: "origin", url: "https://example.com/repo.git" }]);
   });
 
-  test("listRemotes returns remotes sorted by name", async () => {
+  test("listRemotes returns remotes in config order", async () => {
     const repo = await lastValueFrom(createMemoryRepository());
     await lastValueFrom(repo.addRemote("upstream", "https://upstream.git"));
     await lastValueFrom(repo.addRemote("origin", "https://origin.git"));
@@ -29,10 +29,11 @@ describe("Repository remotes", () => {
     const repo = await lastValueFrom(createMemoryRepository());
     await lastValueFrom(repo.addRemote("origin", "https://example.com/repo.git"));
 
-    await lastValueFrom(repo.removeRemote("origin"));
+    const result = await lastValueFrom(repo.removeRemote("origin"));
 
     const remotes = await lastValueFrom(repo.listRemotes());
     expect(remotes).toEqual([]);
+    expect(result).toEqual({ removed: 1 });
   });
 
   test("removeRemote only deletes matching remote", async () => {
@@ -40,10 +41,19 @@ describe("Repository remotes", () => {
     await lastValueFrom(repo.addRemote("origin", "https://origin.git"));
     await lastValueFrom(repo.addRemote("upstream", "https://upstream.git"));
 
-    await lastValueFrom(repo.removeRemote("origin"));
+    const result = await lastValueFrom(repo.removeRemote("origin"));
 
     const remotes = await lastValueFrom(repo.listRemotes());
     expect(remotes).toEqual([{ name: "upstream", url: "https://upstream.git" }]);
+    expect(result).toEqual({ removed: 1 });
+  });
+
+  test("removeRemote reports zero when remote does not exist", async () => {
+    const repo = await lastValueFrom(createMemoryRepository());
+
+    const result = await lastValueFrom(repo.removeRemote("origin"));
+
+    expect(result).toEqual({ removed: 0 });
   });
 
   test("ignores non-url remote config entries", async () => {
@@ -55,5 +65,23 @@ describe("Repository remotes", () => {
 
     const remotes = await lastValueFrom(repo.listRemotes());
     expect(remotes).toEqual([{ name: "origin", url: "https://example.com/repo.git" }]);
+  });
+
+  test("listRemotes includes optional pushUrl", async () => {
+    const repo = await lastValueFrom(createMemoryRepository());
+    await lastValueFrom(repo.addRemote("origin", "https://example.com/repo.git"));
+    await lastValueFrom(
+      repo.config.set("remote", "origin.pushurl", "https://push.example.com/repo.git"),
+    );
+
+    const remotes = await lastValueFrom(repo.listRemotes());
+
+    expect(remotes).toEqual([
+      {
+        name: "origin",
+        url: "https://example.com/repo.git",
+        pushUrl: "https://push.example.com/repo.git",
+      },
+    ]);
   });
 });

@@ -39,7 +39,12 @@ import type { WorkspaceBackend } from "./workspace-backend.js";
 import { isIgnored, parseGitignore, type GitignorePattern } from "./gitignore.js";
 import { diffHeadRef, diffIndexHead, diffWorktreeIndex } from "./repository-diff.js";
 import { fastForwardMerge, merge, type MergeOptions } from "./repository-merge.js";
-import { addRemote, listRemotes, removeRemote } from "./repository-remotes.js";
+import {
+  addRemote,
+  listRemotes,
+  removeRemote,
+  type RemoveRemoteResult,
+} from "./repository-remotes.js";
 import { fetch, pull, push, type FetchOptions } from "./repository-fetch.js";
 import type { Transport } from "./transport.js";
 import {
@@ -736,7 +741,7 @@ export class Repository {
   }
 
   /** Removes a remote repository and its configuration. */
-  removeRemote(name: string): Observable<void> {
+  removeRemote(name: string): Observable<RemoveRemoteResult> {
     return removeRemote(this.config, name);
   }
 
