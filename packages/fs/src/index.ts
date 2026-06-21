@@ -5,3 +5,4 @@
  * abstractions: object database, refs, index, workspace, and config.
  */
 export * from "./node-workspace.js";
+export * from "./node-config.js";
