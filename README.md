@@ -13,8 +13,9 @@ This repository is a Bun workspace monorepo:
 ```text
 packages/
 ├── slim-git          # Main SDK entry point
-├── @slim-git/core    # Object store, refs, index, config, repository
-├── @slim-git/memory  # In-memory storage backend
+├── @slim-git/core    # Object store, refs, index, config, repository, merge
+├── @slim-git/memory  # In-memory storage backend and transport
+├── @slim-git/http    # Smart HTTP transport foundation (ref discovery, pkt-line)
 └── @slim-git/types   # Shared TypeScript types and errors
 ```
 
@@ -59,12 +60,15 @@ console.log("Created commit:", oid);
 - Object storage: blob/tree/commit read/write with SHA-1 or SHA-256
 - Staging: `add`, `remove`, `restore`
 - Commits: `commit`, `amend`
-- Status: modified, staged, deleted, and untracked files
+- Status: modified, staged, deleted, untracked files, and `.gitignore` filtering
 - History: `log`
 - Branches: `createBranch`, `listBranches`, `deleteBranch`, `getCurrentBranch`
 - Tags: `createTag`, `listTags`, `deleteTag`
 - Workspace switching: `checkout`
 - Diff: `diffWorktreeIndex`, `diffIndexHead`, `diffHeadRef`
+- Merge: `fastForwardMerge`, `merge` (three-way with conflict markers)
+- Remotes: `addRemote`, `removeRemote`, `listRemotes`
+- Transport: `fetch`, `push`, `pull` via the `Transport` abstraction
 
 ## Scripts
 
@@ -85,12 +89,17 @@ bun run fmt:check # check formatting
 │  Repository                        │
 │  - status, add, commit, amend …    │
 │  - log, branches, tags, checkout   │
+│  - diff, merge, remotes, fetch…    │
 ├────────────────────────────────────┤
 │  Object Store + Ref/Index Stores   │
 ├────────────────────────────────────┤
 │  Storage Backend                   │
 │  - MemoryBackend (today)           │
 │  - NodeBackend (planned)           │
+├────────────────────────────────────┤
+│  Transport                         │
+│  - MemoryTransport (testing)       │
+│  - SmartHttpTransport (planned)    │
 └────────────────────────────────────┘
 ```
 
@@ -102,8 +111,8 @@ Phases follow [`plan.md`](./plan.md):
 - [x] Phase 1 — Staging & commit
 - [x] Phase 2 — History & branches
 - [x] Phase 3 — Diff
-- [ ] Phase 4 — Remotes (smart HTTP fetch/push)
-- [ ] Phase 5 — Merge (fast-forward + conflict markers)
+- [x] Phase 4 — Remotes (smart HTTP fetch/push foundation)
+- [x] Phase 5 — Merge (fast-forward + three-way conflict markers) and `.gitignore`
 - [ ] Phase 6 — Polish, docs, benchmarks
 - [ ] Phase 7 — Optional TypeORM SQL acceleration
 
