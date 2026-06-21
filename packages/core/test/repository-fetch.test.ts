@@ -124,8 +124,7 @@ describe("Repository fetch/push/pull", () => {
 
     expect(result.fetch.fetched).toHaveLength(1);
     expect(result.fetch.fetched[0]?.oid).toBe(remoteHead);
-    expect(result.merge.merged).toBe(true);
-    expect(result.merge.commitOid).toBe(remoteHead);
+    expect(result.merge).toMatchObject({ merged: true, commitOid: remoteHead });
     expect(await lastValueFrom(local.resolveRef("HEAD"))).toBe(remoteHead);
   });
 });

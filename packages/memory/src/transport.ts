@@ -29,6 +29,10 @@ export class MemoryTransport implements Transport {
   ) {}
 
   discoverRefs(): Observable<readonly DiscoveredRef[]> {
+    return this.discoverReceiveRefs();
+  }
+
+  discoverReceiveRefs(): Observable<readonly DiscoveredRef[]> {
     const refs: DiscoveredRef[] = Array.from(this.remoteRefs.entries())
       .map(([name, oid]) => ({ name, oid: oid as Oid }))
       .sort((a, b) => a.name.localeCompare(b.name));

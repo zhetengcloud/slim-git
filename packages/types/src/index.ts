@@ -10,7 +10,7 @@ export type ObjectType = (typeof ObjectTypes)[number];
  */
 export type Oid = string & { readonly __brand: "Oid" };
 
-/** Hash algorithms supported for object ids. */
+/** Hash algorithm identifiers supported for object ids. */
 export type HashAlgorithmName = "sha1" | "sha256";
 
 /** A Git object as stored in the object database. */
@@ -203,6 +203,7 @@ export interface DeleteTagResult {
 export interface DestroyResult {
   readonly destroyed: true;
 }
+
 /** Result of a line-level diff between two trees. */
 export interface Diff {
   readonly files: readonly FileDiff[];
@@ -237,11 +238,22 @@ export interface Remote {
   readonly url: string;
 }
 
-/** Result of a successful fast-forward merge. */
-export interface MergeResult {
+/** Result of a successful merge. */
+export interface MergeSuccessResult {
   readonly merged: true;
   readonly commitOid: Oid;
 }
+
+/** A single path that could not be merged automatically. */
+export interface MergeConflict {
+  readonly path: string;
+  readonly content: Uint8Array;
+}
+
+/** Result of a merge: either a success or a list of conflicts. */
+export type MergeResult =
+  | MergeSuccessResult
+  | { readonly merged: false; readonly conflicts: readonly MergeConflict[] };
 
 /** Result of a fetch operation. */
 export interface FetchResult {
