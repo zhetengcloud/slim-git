@@ -1,3 +1,9 @@
+/**
+ * Public exports for `@slim-git/core`.
+ *
+ * This package contains the backend abstractions, object model, and repository
+ * implementation. Concrete backends (memory, filesystem, SQL) live in separate packages.
+ */
 export * from "@slim-git/types";
 export * from "./backend.js";
 export * from "./commit-builder.js";

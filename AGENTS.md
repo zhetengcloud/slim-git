@@ -25,6 +25,14 @@ This file contains project-specific instructions for coding agents working on **
 - Prefer dependency injection over static/global state, especially for storage backends.
 - Design for the storage-backend abstraction described in `plan.md` §7.
 
+## 3.5 Comments & Documentation
+
+- Add concise comments that explain **why** and **what**, not just restate the code.
+- Document all public exports (interfaces, classes, functions, and type aliases) with TSDoc-style comments.
+- Comment non-obvious algorithms, Git format details, and performance trade-offs.
+- Keep comments close to the code they describe; prefer inline comments over long preamble blocks.
+- Update comments when the code they describe changes.
+
 ## 4. Style: Declarative & Reactive
 
 - Use **RxJS** for asynchronous and event-driven logic.

@@ -9,6 +9,7 @@ import type { RefStore } from "./ref-store.js";
 import { TreeBuilder } from "./tree-builder.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
 
+/** Options used when initializing or opening a repository. */
 export interface RepositoryOptions {
   readonly hash?: HashAlgorithm;
   readonly refs?: RefStore;
@@ -16,14 +17,21 @@ export interface RepositoryOptions {
   readonly workspace?: WorkspaceBackend;
 }
 
+/** Options used when creating or amending a commit. */
 export interface CommitOptions {
   readonly message: string;
   readonly author: Person;
   readonly committer?: Person;
 }
 
+/** Default file mode used for regular files staged into the index. */
 const DefaultFileMode = 0o100644;
 
+/**
+ * Creates an index entry from a workspace file.
+ * Timestamps are set to the current time; device/inode fields are zeroed because
+ * the memory backend does not track real filesystem metadata.
+ */
 const createIndexEntry = (path: string, oid: Oid, content: Uint8Array): IndexEntry => {
   const now = new Date();
   const timestampSeconds = Math.floor(now.getTime() / 1000);
@@ -49,11 +57,16 @@ const createIndexEntry = (path: string, oid: Oid, content: Uint8Array): IndexEnt
   };
 };
 
+/** Internal representation of a parsed tree entry used for HEAD comparisons. */
 interface TreeEntryMap {
   readonly oid: Oid;
   readonly mode: number;
 }
 
+/**
+ * Parses the raw bytes of a Git tree object into a map of name → entry.
+ * Tree format: `<mode> <name>\0<20-byte oid>` repeated for each entry.
+ */
 const parseTreeEntries = (content: Uint8Array): Map<string, TreeEntryMap> => {
   const entries = new Map<string, TreeEntryMap>();
   const text = new TextDecoder().decode(content);
@@ -80,6 +93,10 @@ const parseTreeEntries = (content: Uint8Array): Map<string, TreeEntryMap> => {
   return entries;
 };
 
+/**
+ * Recursively walks a tree to find the entry at the given path segments.
+ * Returns undefined if any segment is missing.
+ */
 const findInTree = async (
   store: ObjectStore,
   treeOid: Oid,
@@ -104,6 +121,12 @@ const findInTree = async (
   return findInTree(store, entry.oid, segments.slice(1));
 };
 
+/**
+ * High-level repository API.
+ *
+ * `Repository` wires together storage, refs, index, workspace, and the object store
+ * to provide the everyday Git operations implemented by slim-git.
+ */
 export class Repository {
   readonly objectStore: ObjectStore;
   readonly refs: RefStore;
@@ -123,6 +146,7 @@ export class Repository {
     this.workspace = workspace;
   }
 
+  /** Creates a fresh repository instance backed by the given storage backend. */
   static async init(backend: StorageBackend, options: RepositoryOptions = {}): Promise<Repository> {
     return new Repository(
       backend,
@@ -140,10 +164,23 @@ export class Repository {
     );
   }
 
+  /**
+   * Opens an existing repository.
+   * Currently equivalent to `init` because slim-git does not yet persist repository
+   * metadata; this will evolve once the filesystem backend lands.
+   */
   static async open(backend: StorageBackend, options: RepositoryOptions = {}): Promise<Repository> {
     return Repository.init(backend, options);
   }
 
+  /**
+   * Compares the workspace against the index and HEAD.
+   *
+   * - `staged` — index entries that differ from HEAD.
+   * - `modified` — tracked files whose workspace content differs from the index.
+   * - `deleted` — tracked files that no longer exist in the workspace.
+   * - `untracked` — workspace files not present in the index.
+   */
   async status(): Promise<Status> {
     const index = await this.indexStore.read();
     const workspaceFiles = await this.workspace.listFiles();
@@ -175,6 +212,7 @@ export class Repository {
     return { staged, modified, deleted, untracked };
   }
 
+  /** Reads HEAD and returns the tree oid of the commit it points to, if any. */
   private async readHeadTree(): Promise<Oid | undefined> {
     const head = await this.refs.read("HEAD");
     if (head === undefined) {
@@ -188,6 +226,10 @@ export class Repository {
     return treeLine?.slice(5) as Oid | undefined;
   }
 
+  /**
+   * Computes staged paths by comparing each index entry to its counterpart
+   * in the HEAD tree. When there is no HEAD, every path is considered staged.
+   */
   private async computeStaged(index: Index, headTree: Oid | undefined): Promise<string[]> {
     if (headTree === undefined) {
       return index.paths;
@@ -211,6 +253,7 @@ export class Repository {
     return changes.filter((path): path is string => path !== undefined);
   }
 
+  /** Stages workspace files as blobs in the index. */
   async add(paths: readonly string[]): Promise<void> {
     const index = await this.indexStore.read();
     const next = await paths.reduce<Promise<Index>>(async (currentIndexPromise, path) => {
@@ -223,12 +266,14 @@ export class Repository {
     await this.indexStore.write(next);
   }
 
+  /** Removes files from both the workspace and the index. */
   async remove(paths: readonly string[]): Promise<void> {
     const index = await this.indexStore.read();
     await Promise.all(paths.map((path) => this.workspace.removeFile(path)));
     await this.indexStore.write(index.removeMany(paths));
   }
 
+  /** Writes the indexed version of each path back into the workspace. */
   async restore(paths: readonly string[]): Promise<void> {
     const index = await this.indexStore.read();
     await Promise.all(
@@ -243,6 +288,12 @@ export class Repository {
     );
   }
 
+  /**
+   * Creates a commit from the current index, updates HEAD, and clears the index.
+   *
+   * Note: clearing the index after commit is the current slim-git behavior for the
+   * memory backend; it will be revised to match canonical Git once persistence lands.
+   */
   async commit(options: CommitOptions): Promise<Oid> {
     const index = await this.indexStore.read();
     const treeOid = await this.buildTreeFromIndex(index);
@@ -264,6 +315,7 @@ export class Repository {
     return commitOid;
   }
 
+  /** Rewrites the current HEAD commit in place, keeping its tree and parents. */
   async amend(options: CommitOptions): Promise<Oid> {
     const headTarget = await this.refs.read("HEAD");
     if (headTarget === undefined) {
@@ -294,6 +346,7 @@ export class Repository {
     return commitOid;
   }
 
+  /** Builds a tree object from every entry in the index and returns its oid. */
   private async buildTreeFromIndex(index: Index): Promise<Oid> {
     const builder = index.toArray().reduce((tree, entry) => {
       return tree.insert(entry.path, entry.oid, entry.mode);
@@ -302,6 +355,7 @@ export class Repository {
     return builder.build(this.objectStore);
   }
 
+  /** Extracts parent oids from a commit object's text content. */
   private async readParents(commitOid: Oid): Promise<Oid[]> {
     const object = await this.objectStore.read(commitOid);
     const text = new TextDecoder().decode(object.content);
@@ -311,6 +365,7 @@ export class Repository {
       .map((line) => line.slice(7) as Oid);
   }
 
+  /** Releases any resources held by the repository. */
   destroy(): Promise<void> {
     return Promise.resolve();
   }

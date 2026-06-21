@@ -1,3 +1,9 @@
+/**
+ * Pluggable abstraction over the repository working tree.
+ *
+ * Implementations may target the real filesystem, an in-memory map, or any other
+ * file-like storage. This keeps repository operations decoupled from Node.js fs APIs.
+ */
 export interface WorkspaceBackend {
   readonly name: string;
   readFile(path: string): Promise<Uint8Array>;

@@ -11,6 +11,12 @@ import type {
 } from "@slim-git/core";
 import { Index, NotFoundError, Repository as RepositoryImpl } from "@slim-git/core";
 
+/**
+ * In-memory implementation of `StorageBackend`.
+ *
+ * Stores Git objects in a `Map<Oid, GitObject>`. Fast and deterministic,
+ * making it ideal for unit tests and ephemeral operations.
+ */
 export class MemoryBackend implements StorageBackend {
   readonly name = "memory";
 
@@ -34,6 +40,7 @@ export class MemoryBackend implements StorageBackend {
   }
 }
 
+/** In-memory implementation of `RefStore` backed by a `Map<string, string>`. */
 export class MemoryRefStore implements RefStore {
   private readonly refs = new Map<string, string>();
 
@@ -53,6 +60,7 @@ export class MemoryRefStore implements RefStore {
   }
 }
 
+/** In-memory implementation of `IndexStore` that holds a single `Index` instance. */
 export class MemoryIndexStore implements IndexStore {
   private index: Index = Index.empty();
 
@@ -65,6 +73,7 @@ export class MemoryIndexStore implements IndexStore {
   }
 }
 
+/** In-memory implementation of `WorkspaceBackend` backed by a `Map<string, Uint8Array>`. */
 export class MemoryWorkspaceBackend implements WorkspaceBackend {
   readonly name = "memory-workspace";
 
@@ -95,12 +104,17 @@ export class MemoryWorkspaceBackend implements WorkspaceBackend {
   }
 }
 
+/** Options for creating an in-memory repository. */
 export interface MemoryRepositoryOptions extends RepositoryOptions {
   readonly refs?: RefStore;
   readonly index?: IndexStore;
   readonly workspace?: WorkspaceBackend;
 }
 
+/**
+ * Convenience factory that creates a repository with in-memory backends.
+ * Useful for tests and for exploring the SDK without touching the filesystem.
+ */
 export const createMemoryRepository = (
   options: MemoryRepositoryOptions = {},
 ): Promise<Repository> =>

@@ -1,6 +1,10 @@
 import type { CommitInfo, Oid, Person } from "@slim-git/types";
 import type { ObjectStore } from "./object-store.js";
 
+/**
+ * Formats a timezone offset in Git's `+HHMM` / `-HHMM` notation.
+ * Git stores offsets as minutes east of UTC, so a negative value becomes a positive sign.
+ */
 const formatTimezoneOffset = (offsetMinutes: number): string => {
   const sign = offsetMinutes <= 0 ? "+" : "-";
   const absolute = Math.abs(offsetMinutes);
@@ -11,12 +15,22 @@ const formatTimezoneOffset = (offsetMinutes: number): string => {
   return `${sign}${hours}${minutes}`;
 };
 
+/** Serializes a person line as `Name <email> timestamp timezone`. */
 const formatPerson = (label: string, person: Person): string => {
   const seconds = Math.floor(person.timestamp.getTime() / 1000);
   const offset = formatTimezoneOffset(person.timezoneOffsetMinutes);
   return `${label} ${person.name} <${person.email}> ${seconds} ${offset}`;
 };
 
+/**
+ * Serializes a commit object into Git's canonical byte format:
+ * tree <oid>
+ * parent <oid>
+ * author <person>
+ * committer <person>
+ *
+ * <message>
+ */
 const buildCommitBytes = (info: CommitInfo): Uint8Array => {
   const encoder = new TextEncoder();
   const lines: string[] = [
@@ -30,6 +44,20 @@ const buildCommitBytes = (info: CommitInfo): Uint8Array => {
   return encoder.encode(lines.join("\n"));
 };
 
+/**
+ * Fluent builder for Git commit objects.
+ *
+ * Example:
+ * ```ts
+ * const oid = await new CommitBuilder()
+ *   .tree(treeOid)
+ *   .parent(parentOid)
+ *   .author(person)
+ *   .committer(person)
+ *   .message("hello")
+ *   .build(objectStore);
+ * ```
+ */
 export class CommitBuilder {
   private parents: Oid[] = [];
   private treeValue: Oid | undefined;
@@ -67,6 +95,7 @@ export class CommitBuilder {
     return this;
   }
 
+  /** Serializes the commit and writes it to the object store. */
   async build(store: ObjectStore): Promise<Oid> {
     if (this.treeValue === undefined) {
       throw new Error("CommitBuilder: tree is required");

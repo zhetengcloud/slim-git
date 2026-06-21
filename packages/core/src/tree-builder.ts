@@ -1,8 +1,13 @@
 import type { Oid, TreeEntry } from "@slim-git/types";
 import type { ObjectStore } from "./object-store.js";
 
+/** Splits a file path into its directory segments. */
 const splitPath = (path: string): string[] => path.split("/").filter(Boolean);
 
+/**
+ * Serializes tree entries into Git's tree object format.
+ * Entries are sorted by name, then encoded as `<mode> <name>\0<20-byte oid>`.
+ */
 const buildTreeBytes = (entries: TreeEntry[]): Uint8Array => {
   const encoder = new TextEncoder();
   const parts: Uint8Array[] = entries
@@ -27,6 +32,7 @@ const buildTreeBytes = (entries: TreeEntry[]): Uint8Array => {
   return result;
 };
 
+/** Converts a lowercase hex oid string into raw bytes. */
 const hexToBytes = (hex: string): Uint8Array => {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {
@@ -35,13 +41,19 @@ const hexToBytes = (hex: string): Uint8Array => {
   return bytes;
 };
 
+/** Recursive tree structure used while building nested trees from flat paths. */
 interface TreeNode {
   readonly entries: TreeEntry[];
   readonly children: Map<string, TreeNode>;
 }
 
+/** Creates an empty tree node. */
 const emptyNode = (): TreeNode => ({ entries: [], children: new Map() });
 
+/**
+ * Inserts a path into a tree node recursively.
+ * Intermediate components become directory nodes; the final component becomes a blob entry.
+ */
 const insertIntoNode = (
   node: TreeNode,
   segments: readonly string[],
@@ -70,6 +82,10 @@ const insertIntoNode = (
   };
 };
 
+/**
+ * Recursively writes tree objects bottom-up.
+ * Each directory node becomes a tree object; its oid is inserted into its parent.
+ */
 const buildNode = async (node: TreeNode, store: ObjectStore): Promise<Oid> => {
   const childEntries: TreeEntry[] = await Promise.all(
     Array.from(node.children.entries()).map(async ([name, child]) => ({
@@ -85,9 +101,21 @@ const buildNode = async (node: TreeNode, store: ObjectStore): Promise<Oid> => {
   return written.oid;
 };
 
+/**
+ * Fluent builder that turns a flat list of file paths into nested Git tree objects.
+ *
+ * Example:
+ * ```ts
+ * const rootTree = await new TreeBuilder()
+ *   .insert("src/index.ts", oid, mode)
+ *   .insert("README.md", oid, mode)
+ *   .build(objectStore);
+ * ```
+ */
 export class TreeBuilder {
   private root: TreeNode = emptyNode();
 
+  /** Inserts a file path into the tree structure. */
   insert(path: string, oid: Oid, mode: number): TreeBuilder {
     const segments = splitPath(path);
     if (segments.length === 0) {
@@ -98,6 +126,7 @@ export class TreeBuilder {
     return this;
   }
 
+  /** Writes all tree objects and returns the oid of the root tree. */
   async build(store: ObjectStore): Promise<Oid> {
     return buildNode(this.root, store);
   }
