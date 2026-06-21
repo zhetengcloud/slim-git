@@ -18,6 +18,7 @@ Scope is intentionally narrow. Only the Git operations people use every day are 
 The API is object-oriented and promise-based. A repository is opened or initialized as an instance, then callers use methods such as `add`, `commit`, `log`, `status`, `push`, and `merge`.
 
 Core API groups:
+
 - **Lifecycle**: init, open, destroy.
 - **Workspace**: status, add, remove, restore.
 - **Commits**: commit, amend, log, getCommit.
@@ -31,6 +32,7 @@ Core API groups:
 ## 4. Feature Scope (Slim)
 
 ### Included
+
 - Repository init/open.
 - Staging: `add`, `remove`, `restore`.
 - Commit and amend.
@@ -44,6 +46,7 @@ Core API groups:
 - `.gitignore` support.
 
 ### Explicitly Out of Scope
+
 - Rebase, interactive rebase, cherry-pick.
 - Submodules, worktrees, subtrees.
 - Annotated tags.
@@ -99,6 +102,7 @@ The SDK abstracts storage so the same core logic runs on different backends.
 For lightweight homelab use, slim-git can optionally persist an index/cache in a SQL database via **TypeORM**. The `.git` directory remains the canonical source of truth; SQL is only used to accelerate queries.
 
 Supported databases (via TypeORM):
+
 - SQLite
 - PostgreSQL
 - MySQL / MariaDB
@@ -107,6 +111,7 @@ Supported databases (via TypeORM):
 The user provides the TypeORM `DataSource`; slim-git does not prescribe a default database.
 
 Indexed tables:
+
 - `objects` — oid → storage location (loose file or pack offset).
 - `refs` — ref name → target, peeled target, update time.
 - `commits` — oid → parents, tree, author/committer info, message.
@@ -114,18 +119,21 @@ Indexed tables:
 - `pack_index` — packfile metadata and validation timestamps.
 
 Sync strategy:
+
 - Write-through to `.git` first, then update SQL.
 - Reindex from `.git` on open if the SQL cache is missing or stale.
 - Validate against `.git` mtimes/checksums before trusting cached rows.
 - Use TypeORM transactions for atomic index updates.
 
 Performance wins:
+
 - `status()` avoids rescanning the object store.
 - `log()` walks pre-parsed parent relationships.
 - `exists(oid)` becomes a primary-key lookup.
 - Branch/tag listing is instant.
 
 Trade-offs:
+
 - Adds a second artifact to manage.
 - Reindexing has a one-time cost.
 - Extra consistency logic on writes.
@@ -136,7 +144,7 @@ Compatible with canonical Git’s loose-object model, but simplified:
 
 - **Object types**: blob, tree, commit, tag.
 - **Hash**: SHA-1 by default; SHA-256 opt-in.
-- **Refs**: HEAD, refs/heads/*, refs/tags/*, refs/remotes/*.
+- **Refs**: HEAD, refs/heads/_, refs/tags/_, refs/remotes/\*.
 - **Index**: v2 format minimum.
 - **Config**: minimal `.git/config` parser.
 
@@ -145,38 +153,46 @@ Packfiles are read and written lazily. Loose objects are the default for simplic
 ## 9. Implementation Phases
 
 ### Phase 0 — Core Object Model
+
 - Repository init/open.
 - Object read/write.
 - Node FS and in-memory backends.
 
 ### Phase 1 — Staging & Commit
+
 - Index read/write.
 - `status`, `add`, `remove`, `restore`.
 - `commit` and amend.
 
 ### Phase 2 — History & Branches
+
 - `log` with async iteration.
 - Branch CRUD and `checkout`.
 - Lightweight tags.
 
 ### Phase 3 — Diff
+
 - Worktree vs index, index vs HEAD, HEAD vs branch diff.
 - Basic line-level diff.
 
 ### Phase 4 — Remotes
+
 - Remote management.
 - Smart HTTP fetch/push.
 - `pull` as fetch + fast-forward merge.
 
 ### Phase 5 — Merge
+
 - Fast-forward merge.
 - Detect non-fast-forward merges, write conflict markers, and stop.
 - `.gitignore` support.
 
 ### Phase 6 — Polish
+
 - TypeScript types, documentation, benchmarks against canonical Git.
 
 ### Phase 7 — SQL Acceleration (Optional)
+
 - TypeORM entity layer.
 - Write-through synchronization.
 - Reindex from `.git` on open.
@@ -222,9 +238,9 @@ const status = await repo.status();
 if (status.staged.length > 0) {
   await repo.commit({
     message: `Auto-commit ${status.staged.length} files`,
-    author: { name: 'Extension', email: 'ext@example.com' },
+    author: { name: "Extension", email: "ext@example.com" },
   });
-  await repo.push('origin', await repo.getCurrentBranch());
+  await repo.push("origin", await repo.getCurrentBranch());
 }
 ```
 

@@ -1,10 +1,10 @@
-export const ObjectTypes = ['blob', 'tree', 'commit', 'tag'] as const;
+export const ObjectTypes = ["blob", "tree", "commit", "tag"] as const;
 
 export type ObjectType = (typeof ObjectTypes)[number];
 
-export type Oid = string & { readonly __brand: 'Oid' };
+export type Oid = string & { readonly __brand: "Oid" };
 
-export type HashAlgorithmName = 'sha1' | 'sha256';
+export type HashAlgorithmName = "sha1" | "sha256";
 
 export interface GitObject {
   readonly type: ObjectType;

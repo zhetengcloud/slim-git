@@ -7,9 +7,9 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@slim-git/types": "workspace:*",
     "@slim-git/core": "workspace:*",
-    "@slim-git/memory": "workspace:*"
+    "@slim-git/memory": "workspace:*",
+    "@slim-git/types": "workspace:*"
   },
   "peerDependencies": {
     "typescript": "^5"

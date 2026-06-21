@@ -1,6 +1,6 @@
-import type { GitObject, ObjectType, Oid } from '@slim-git/types';
-import type { StorageBackend } from './backend.js';
-import type { HashAlgorithm } from './hash.js';
+import type { GitObject, ObjectType, Oid } from "@slim-git/types";
+import type { StorageBackend } from "./backend.js";
+import type { HashAlgorithm } from "./hash.js";
 
 export class ObjectStore {
   constructor(

@@ -1,18 +1,21 @@
 {
   "name": "slim-git-workspace",
   "private": true,
-  "type": "module",
   "workspaces": [
     "packages/@slim-git/*",
     "packages/slim-git"
   ],
+  "type": "module",
   "scripts": {
     "test": "bun test",
     "lint": "bun x oxlint@latest",
-    "typecheck": "bun tsc --build"
+    "typecheck": "bun tsc --build",
+    "fmt": "bun x oxfmt",
+    "fmt:check": "bun x oxfmt --check"
   },
   "devDependencies": {
     "@types/bun": "latest",
+    "oxfmt": "latest",
     "oxlint": "latest",
     "typescript": "^5"
   }

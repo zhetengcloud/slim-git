@@ -1,8 +1,8 @@
-import type { GitObject, Oid, StorageBackend } from '@slim-git/core';
-import { NotFoundError } from '@slim-git/core';
+import type { GitObject, Oid, StorageBackend } from "@slim-git/core";
+import { NotFoundError } from "@slim-git/core";
 
 export class MemoryBackend implements StorageBackend {
-  readonly name = 'memory';
+  readonly name = "memory";
 
   private readonly objects = new Map<Oid, GitObject>();
 

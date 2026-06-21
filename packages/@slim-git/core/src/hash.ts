@@ -1,5 +1,5 @@
-import { createHash } from 'node:crypto';
-import type { GitObject, HashAlgorithmName, ObjectType, Oid } from '@slim-git/types';
+import { createHash } from "node:crypto";
+import type { GitObject, HashAlgorithmName, ObjectType, Oid } from "@slim-git/types";
 
 export interface HashAlgorithm {
   readonly name: HashAlgorithmName;
@@ -24,10 +24,10 @@ const buildObjectBytes = (type: ObjectType, content: Uint8Array): Uint8Array =>
 
 const toHex = (bytes: Uint8Array): Oid =>
   Array.from(bytes)
-    .map((byte) => byte.toString(16).padStart(2, '0'))
-    .join('') as Oid;
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("") as Oid;
 
-const createGitHash = (algorithm: 'sha1' | 'sha256') => {
+const createGitHash = (algorithm: "sha1" | "sha256") => {
   const digest = (data: Uint8Array): Oid => {
     const hash = createHash(algorithm);
     hash.update(data);
@@ -48,7 +48,7 @@ const createGitHash = (algorithm: 'sha1' | 'sha256') => {
   };
 };
 
-export const Sha1Hash: HashAlgorithm = createGitHash('sha1');
-export const Sha256Hash: HashAlgorithm = createGitHash('sha256');
+export const Sha1Hash: HashAlgorithm = createGitHash("sha1");
+export const Sha256Hash: HashAlgorithm = createGitHash("sha256");
 
 export const DefaultHash = Sha1Hash;

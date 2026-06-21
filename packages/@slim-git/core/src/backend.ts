@@ -1,4 +1,4 @@
-import type { GitObject, Oid } from '@slim-git/types';
+import type { GitObject, Oid } from "@slim-git/types";
 
 export interface StorageBackend {
   readonly name: string;
