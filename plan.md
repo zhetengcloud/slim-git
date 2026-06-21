@@ -82,7 +82,7 @@ This removes all automatic merge-resolution strategies while still giving users 
 │  - loose objects, pack index       │
 ├────────────────────────────────────┤
 │  Storage Backend                   │
-│  - Node FS, In-Memory, TypeORM SQL │
+│  - Node FS, In-Memory              │
 ├────────────────────────────────────┤
 │  Transport                         │
 │  - smart HTTP fetch/push           │
@@ -95,48 +95,6 @@ The SDK abstracts storage so the same core logic runs on different backends.
 
 - **NodeBackend** — Node.js filesystem. Default for real repositories.
 - **MemoryBackend** — In-memory store for unit tests and ephemeral operations.
-- **TypeORM SQL Backend** — Optional acceleration layer for homelab deployments.
-
-### 7.1 SQL-Accelerated Storage
-
-For lightweight homelab use, slim-git can optionally persist an index/cache in a SQL database via **TypeORM**. The `.git` directory remains the canonical source of truth; SQL is only used to accelerate queries.
-
-Supported databases (via TypeORM):
-
-- SQLite
-- PostgreSQL
-- MySQL / MariaDB
-- SQL Server
-
-The user provides the TypeORM `DataSource`; slim-git does not prescribe a default database.
-
-Indexed tables:
-
-- `objects` — oid → storage location (loose file or pack offset).
-- `refs` — ref name → target, peeled target, update time.
-- `commits` — oid → parents, tree, author/committer info, message.
-- `index_cache` — cached index entries for fast `status()`.
-- `pack_index` — packfile metadata and validation timestamps.
-
-Sync strategy:
-
-- Write-through to `.git` first, then update SQL.
-- Reindex from `.git` on open if the SQL cache is missing or stale.
-- Validate against `.git` mtimes/checksums before trusting cached rows.
-- Use TypeORM transactions for atomic index updates.
-
-Performance wins:
-
-- `status()` avoids rescanning the object store.
-- `log()` walks pre-parsed parent relationships.
-- `exists(oid)` becomes a primary-key lookup.
-- Branch/tag listing is instant.
-
-Trade-offs:
-
-- Adds a second artifact to manage.
-- Reindexing has a one-time cost.
-- Extra consistency logic on writes.
 
 ## 8. Data Model
 
@@ -199,17 +157,7 @@ Packfiles are read and written lazily. Loose objects are the default for simplic
 - Fetch and push against real Git servers (GitHub, GitLab, self-hosted).
 - `side-band-64k` response parsing and report-status handling.
 
-### Phase 8 — SQL Acceleration (Optional, On Hold)
-
-- TypeORM entity layer.
-- Write-through synchronization.
-- Reindex from `.git` on open.
-- Cached `status`, `log`, and `exists` queries.
-- Validate PostgreSQL, MySQL, and SQLite drivers.
-
-**Status:** on hold. The filesystem backend in `@slim-git/fs` is the current priority for real-world persistence.
-
-### Phase 9 — Node Filesystem Backend (Active)
+### Phase 8 — Node Filesystem Backend
 
 - Loose-object storage on disk (`@slim-git/fs`).
 - Ref, index, workspace, and config persistence.
@@ -224,7 +172,6 @@ packages/
 ├── @slim-git/core      # Object store, refs, index, config
 ├── @slim-git/fs        # Node FS backend
 ├── @slim-git/memory    # In-memory backend
-├── @slim-git/sql       # Optional TypeORM SQL acceleration layer
 ├── @slim-git/http      # Smart HTTP transport
 └── @slim-git/types     # Shared TypeScript types
 ```

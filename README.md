@@ -150,13 +150,12 @@ Phases follow [`plan.md`](./plan.md):
 - [x] Phase 5 — Merge (fast-forward + three-way conflict markers) and `.gitignore`
 - [x] Phase 6 — Polish, docs, type consistency, canonical Git round-trip tests
 - [x] Phase 7 — Canonical Smart HTTP transport (fetch/push against real Git servers)
-- [x] Phase 9 — Node.js filesystem backend (`@slim-git/fs`)
-- [ ] Phase 8 — Optional TypeORM SQL acceleration (on hold)
+- [x] Phase 8 — Node.js filesystem backend (`@slim-git/fs`)
 
 ## Design principles
 
 - **SDK-first**: import an API, not a CLI.
-- **Storage-agnostic**: same core logic on memory, filesystem, or SQL backends.
+- **Storage-agnostic**: same core logic on memory or filesystem backends.
 - **Minimal dependencies**: Bun, TypeScript, and RxJS for reactive logic.
 - **Explicit errors**: typed errors such as `NotFoundError`, `ConflictError`, and `UnsupportedError`.
 
