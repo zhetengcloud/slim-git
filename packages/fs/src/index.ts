@@ -6,3 +6,4 @@
  */
 export * from "./node-workspace.js";
 export * from "./node-config.js";
+export * from "./node-ref-store.js";
