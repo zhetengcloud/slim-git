@@ -6,6 +6,7 @@
  */
 export * from "@slim-git/types";
 export * from "@slim-git/core";
+export * from "@slim-git/fs";
 export * from "@slim-git/http";
 export * from "@slim-git/memory";
 

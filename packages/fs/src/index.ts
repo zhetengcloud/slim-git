@@ -10,3 +10,4 @@ export * from "./node-ref-store.js";
 export * from "./node-storage.js";
 export * from "./node-index-store.js";
 export * from "./index-codec.js";
+export * from "./node-repository.js";
