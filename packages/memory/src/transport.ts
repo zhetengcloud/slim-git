@@ -1,6 +1,18 @@
-import type { GitObject, Oid, StorageBackend } from "@slim-git/core";
+import { parseTreeEntries, type GitObject, type Oid, type StorageBackend } from "@slim-git/core";
 import type { DiscoveredRef, PushCommand, PushReport, Transport } from "@slim-git/core";
-import { Observable, of } from "rxjs";
+import {
+  concatMap,
+  defaultIfEmpty,
+  distinct,
+  expand,
+  forkJoin,
+  from,
+  map,
+  of,
+  type Observable,
+  tap,
+  toArray,
+} from "rxjs";
 
 /**
  * In-memory transport for testing fetch/push/pull without network or packfiles.
@@ -23,89 +35,55 @@ export class MemoryTransport implements Transport {
     return of(refs);
   }
 
+  /** Recursively walks the remote object graph from the wanted oids. */
   fetch(wants: readonly Oid[]): Observable<readonly GitObject[]> {
-    const fetched: GitObject[] = [];
-    const visited = new Set<Oid>();
+    const cache = new Map<Oid, GitObject>();
 
-    const visit = async (oid: Oid): Promise<void> => {
-      if (visited.has(oid)) return;
-      visited.add(oid);
-
-      const object = await new Promise<GitObject>((resolve, reject) => {
-        this.remoteObjects.readObject(oid).subscribe({ next: resolve, error: reject });
-      });
-      fetched.push(object);
-
-      if (object.type === "commit") {
-        const text = new TextDecoder().decode(object.content);
-        const parentMatches = text.match(/^parent ([0-9a-f]{40})$/gim);
-        if (parentMatches !== null) {
-          for (const match of parentMatches) {
-            const parentOid = match.split(" ")[1]! as Oid;
-            await visit(parentOid);
-          }
-        }
-        const treeMatch = text.match(/^tree ([0-9a-f]{40})$/im);
-        if (treeMatch !== null) {
-          const treeOid = treeMatch[1]! as Oid;
-          await visit(treeOid);
-        }
-      } else if (object.type === "tree") {
-        const entries = parseTreeEntries(object.content);
-        for (const entry of entries.values()) {
-          await visit(entry.oid);
-        }
+    const readObject$ = (oid: Oid): Observable<GitObject> => {
+      const cached = cache.get(oid);
+      if (cached !== undefined) {
+        return of(cached);
       }
+      return this.remoteObjects.readObject(oid).pipe(tap((object) => cache.set(oid, object)));
     };
 
-    return new Observable((subscriber) => {
-      Promise.all(wants.map((oid) => visit(oid)))
-        .then(() => {
-          subscriber.next(fetched);
-          subscriber.complete();
-        })
-        .catch((error) => subscriber.error(error));
-    });
+    return from(wants).pipe(
+      expand((oid) => readObject$(oid).pipe(concatMap((object) => from(childOids(object))))),
+      distinct(),
+      concatMap((oid) => readObject$(oid)),
+      toArray(),
+      map((objects) => objects as readonly GitObject[]),
+    );
   }
 
   push(commands: readonly PushCommand[], objects: readonly GitObject[]): Observable<PushReport> {
-    for (const object of objects) {
-      this.remoteObjects.writeObject(object).subscribe();
-    }
-
-    const accepted = commands.map(({ ref, newOid }) => {
-      this.remoteRefs.set(ref, newOid);
-      return { ref, oid: newOid, accepted: true };
-    });
-
-    return of({ accepted });
+    return forkJoin(objects.map((object) => this.remoteObjects.writeObject(object))).pipe(
+      defaultIfEmpty([]),
+      map(() => {
+        const accepted = commands.map(({ ref, newOid }) => {
+          this.remoteRefs.set(ref, newOid);
+          return { ref, oid: newOid, accepted: true };
+        });
+        return { accepted };
+      }),
+    );
   }
 }
 
-const parseTreeEntries = (
-  content: Uint8Array,
-): Map<string, { readonly oid: Oid; readonly mode: number }> => {
-  const entries = new Map<string, { readonly oid: Oid; readonly mode: number }>();
-  let position = 0;
-
-  while (position < content.length) {
-    const spaceIndex = content.indexOf(0x20, position);
-    const nullIndex = content.indexOf(0x00, spaceIndex + 1);
-    if (spaceIndex === -1 || nullIndex === -1) break;
-
-    const modeText = new TextDecoder().decode(content.slice(position, spaceIndex));
-    const mode = Number.parseInt(modeText, 8);
-    const name = new TextDecoder().decode(content.slice(spaceIndex + 1, nullIndex));
-    const oidStart = nullIndex + 1;
-    const oidEnd = oidStart + 20;
-    const oidBytes = content.slice(oidStart, oidEnd);
-    const oid = Array.from(oidBytes)
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("") as Oid;
-
-    entries.set(name, { oid, mode });
-    position = oidEnd;
+/** Returns the oids referenced by a Git object (parents/tree for commits, entries for trees). */
+const childOids = (object: GitObject): readonly Oid[] => {
+  if (object.type === "commit") {
+    const text = new TextDecoder().decode(object.content);
+    const parents = [...text.matchAll(/^parent ([0-9a-f]{40})$/gim)].map(
+      (match) => match[1]! as Oid,
+    );
+    const tree = text.match(/^tree ([0-9a-f]{40})$/im)?.[1] as Oid | undefined;
+    return tree === undefined ? parents : [...parents, tree];
   }
 
-  return entries;
+  if (object.type === "tree") {
+    return Array.from(parseTreeEntries(object.content).values()).map((entry) => entry.oid);
+  }
+
+  return [];
 };
