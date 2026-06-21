@@ -10,7 +10,7 @@ export type ObjectType = (typeof ObjectTypes)[number];
  */
 export type Oid = string & { readonly __brand: "Oid" };
 
-/** Hash algorithms supported for object ids. */
+/** Hash algorithm identifiers supported for object ids. */
 export type HashAlgorithmName = "sha1" | "sha256";
 
 /** A Git object as stored in the object database. */
@@ -203,6 +203,7 @@ export interface DeleteTagResult {
 export interface DestroyResult {
   readonly destroyed: true;
 }
+
 /** Result of a line-level diff between two trees. */
 export interface Diff {
   readonly files: readonly FileDiff[];

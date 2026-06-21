@@ -83,6 +83,12 @@ export class SmartHttpTransport {
   }
 }
 
+/**
+ * Parses a Smart HTTP ref advertisement response.
+ *
+ * Validates the service announcement, extracts advertised refs, and parses
+ * the capability list attached to the first ref line.
+ */
 export const parseRefDiscovery = (
   data: Uint8Array,
   expectedService: "git-upload-pack" | "git-receive-pack",
