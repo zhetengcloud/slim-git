@@ -1,4 +1,4 @@
-import type { MergeResult, Oid, Person } from "@slim-git/types";
+import type { MergeResult, Oid, Person, RefWriteResult } from "@slim-git/types";
 import { NotFoundError, UnsupportedError } from "@slim-git/types";
 import {
   combineLatest,
@@ -220,7 +220,7 @@ const createMergeCommit$ = (
     .message(message)
     .build(repo.objectStore);
 
-const updateHead$ = (repo: Repository, headRef: string, oid: Oid): Observable<unknown> =>
+const updateHead$ = (repo: Repository, headRef: string, oid: Oid): Observable<RefWriteResult> =>
   headRef.startsWith("ref: ")
     ? repo.refs.write(headRef.slice("ref: ".length), oid)
     : repo.refs.write("HEAD", oid);
