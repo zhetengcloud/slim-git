@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { Oid } from "@slim-git/types";
 import { encodePktLines, parseRefDiscovery, SmartHttpTransport } from "@slim-git/http";
 
 const oid = "d82a7b2e6c1a9f4b8c3d5e7a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0";
@@ -27,15 +28,15 @@ describe("parseRefDiscovery", () => {
     expect(result.refs).toEqual([
       {
         name: "HEAD",
-        oid: "d82a7b2e6c1a9f4b8c3d5e7a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+        oid: "d82a7b2e6c1a9f4b8c3d5e7a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0" as Oid,
       },
       {
         name: "refs/heads/main",
-        oid: "d82a7b2e6c1a9f4b8c3d5e7a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0",
+        oid: "d82a7b2e6c1a9f4b8c3d5e7a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0" as Oid,
       },
       {
         name: "refs/heads/topic",
-        oid: "d82a7b2e6c1a9f4b8c3d5e7a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b01",
+        oid: "d82a7b2e6c1a9f4b8c3d5e7a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b01" as Oid,
       },
     ]);
     expect(result.capabilities).toContain("multi_ack");
@@ -55,7 +56,7 @@ describe("SmartHttpTransport", () => {
     const request = SmartHttpTransport.buildFetchRequest(["want1", "want2"], ["have1"]);
 
     expect(new TextDecoder().decode(request)).toBe(
-      "0012command=fetch\n000fwant want1\n000fwant want2\n000fhave have1\n0009done\n0000",
+      "001dwant want1 side-band-64k\n000fwant want2\n000fhave have1\n0009done\n0000",
     );
   });
 
