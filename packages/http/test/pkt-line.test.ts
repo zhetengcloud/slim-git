@@ -1,10 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import {
-  decodePktLines,
-  encodeFlushPacket,
-  encodePktLine,
-  encodePktLines,
-} from "@slim-git/http";
+import { decodePktLines, encodeFlushPacket, encodePktLine, encodePktLines } from "@slim-git/http";
 
 const text = (bytes: Uint8Array): string => new TextDecoder().decode(bytes);
 

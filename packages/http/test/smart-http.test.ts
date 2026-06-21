@@ -18,7 +18,10 @@ const discoveryResponse = new TextDecoder().decode(
 
 describe("parseRefDiscovery", () => {
   test("parses the service announcement, refs, and capabilities", () => {
-    const result = parseRefDiscovery(new TextEncoder().encode(discoveryResponse), "git-upload-pack");
+    const result = parseRefDiscovery(
+      new TextEncoder().encode(discoveryResponse),
+      "git-upload-pack",
+    );
 
     expect(result.service).toBe("git-upload-pack");
     expect(result.refs).toEqual([

@@ -68,9 +68,9 @@ const resolveTreeMap$ = (
       if (oid === undefined) {
         return throwError(() => new NotFoundError(source));
       }
-      return repo.readCommitTree$(oid).pipe(
-        concatMap((treeOid) => flattenTree$(repo.objectStore, treeOid)),
-      );
+      return repo
+        .readCommitTree$(oid)
+        .pipe(concatMap((treeOid) => flattenTree$(repo.objectStore, treeOid)));
     }),
   );
 };

@@ -49,7 +49,9 @@ describe("Repository remotes", () => {
   test("ignores non-url remote config entries", async () => {
     const repo = await lastValueFrom(createMemoryRepository());
     await lastValueFrom(repo.addRemote("origin", "https://example.com/repo.git"));
-    await lastValueFrom(repo.config.set("remote", "origin.fetch", "+refs/heads/*:refs/remotes/origin/*"));
+    await lastValueFrom(
+      repo.config.set("remote", "origin.fetch", "+refs/heads/*:refs/remotes/origin/*"),
+    );
 
     const remotes = await lastValueFrom(repo.listRemotes());
     expect(remotes).toEqual([{ name: "origin", url: "https://example.com/repo.git" }]);

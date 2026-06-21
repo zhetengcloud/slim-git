@@ -89,9 +89,7 @@ const insertIntoNode = (
  */
 const buildNode$ = (node: TreeNode, store: ObjectStore): Observable<Oid> => {
   return from(node.children.entries()).pipe(
-    concatMap(([name, child]) =>
-      buildNode$(child, store).pipe(map((oid) => ({ name, oid }))),
-    ),
+    concatMap(([name, child]) => buildNode$(child, store).pipe(map((oid) => ({ name, oid })))),
     toArray(),
     concatMap((childResults) => {
       const childEntries = childResults.map(({ name, oid }) => ({
@@ -100,14 +98,10 @@ const buildNode$ = (node: TreeNode, store: ObjectStore): Observable<Oid> => {
         oid,
       }));
       const allEntries = [...node.entries, ...childEntries];
-      return store.write("tree", buildTreeBytes(allEntries)).pipe(
-        map((written) => written.oid),
-      );
+      return store.write("tree", buildTreeBytes(allEntries)).pipe(map((written) => written.oid));
     }),
   );
 };
-
-
 
 /**
  * Fluent builder that turns a flat list of file paths into nested Git tree objects.

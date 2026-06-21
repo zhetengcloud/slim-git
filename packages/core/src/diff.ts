@@ -55,9 +55,7 @@ const choosePreviousDiagonal = (
 ): number => {
   if (k === -d) return k + 1;
   if (k === d) return k - 1;
-  return getFurthestX(v, maxDistance, k - 1) < getFurthestX(v, maxDistance, k + 1)
-    ? k + 1
-    : k - 1;
+  return getFurthestX(v, maxDistance, k - 1) < getFurthestX(v, maxDistance, k + 1) ? k + 1 : k - 1;
 };
 
 /**

@@ -47,10 +47,12 @@ export interface DecodedPktLines {
  * Returns the decoded payload lines (without trailing LF) and any incomplete
  * trailing bytes that could not form a full frame.
  */
-export const decodePktLines = (data: Uint8Array, previousRemainder?: Uint8Array): DecodedPktLines => {
-  const buffer = previousRemainder !== undefined
-    ? concatUint8Arrays(previousRemainder, data)
-    : data;
+export const decodePktLines = (
+  data: Uint8Array,
+  previousRemainder?: Uint8Array,
+): DecodedPktLines => {
+  const buffer =
+    previousRemainder !== undefined ? concatUint8Arrays(previousRemainder, data) : data;
 
   const lines: string[] = [];
   let position = 0;

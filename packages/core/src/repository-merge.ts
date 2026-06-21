@@ -27,9 +27,9 @@ export const fastForwardMerge = (repo: Repository, target: string): Observable<M
       const headRef = headValue;
       const newOid = targetOid;
 
-      const headOid$ = (headRef.startsWith("ref: ")
-        ? repo.resolveRef(headRef.slice("ref: ".length))
-        : of(headRef)) as Observable<string | undefined>;
+      const headOid$ = (
+        headRef.startsWith("ref: ") ? repo.resolveRef(headRef.slice("ref: ".length)) : of(headRef)
+      ) as Observable<string | undefined>;
 
       return headOid$.pipe(
         concatMap((headOid): Observable<MergeResult> => {
@@ -65,7 +65,11 @@ export const fastForwardMerge = (repo: Repository, target: string): Observable<M
   );
 
 /** Checks whether `ancestor` is an ancestor of `descendant` (or the same commit). */
-const isAncestor$ = (repo: Repository, ancestor: string, descendant: string): Observable<boolean> => {
+const isAncestor$ = (
+  repo: Repository,
+  ancestor: string,
+  descendant: string,
+): Observable<boolean> => {
   if (ancestor === descendant) {
     return of(true);
   }

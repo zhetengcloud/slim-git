@@ -250,7 +250,11 @@ export interface FetchResult {
 
 /** Result of a push operation. */
 export interface PushResult {
-  readonly pushed: readonly { readonly ref: string; readonly oid: Oid; readonly accepted: boolean }[];
+  readonly pushed: readonly {
+    readonly ref: string;
+    readonly oid: Oid;
+    readonly accepted: boolean;
+  }[];
 }
 
 /** Result of a pull operation. */

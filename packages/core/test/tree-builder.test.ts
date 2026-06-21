@@ -84,9 +84,7 @@ describe("TreeBuilder", () => {
     const store = createStore();
     const blob = await writeBlob(store, "deep");
     const treeOid = await lastValueFrom(
-      new TreeBuilder()
-        .insert("a/b/c/d/file.txt", blob.oid, 0o100644)
-        .build(store),
+      new TreeBuilder().insert("a/b/c/d/file.txt", blob.oid, 0o100644).build(store),
     );
 
     const tree = await lastValueFrom(store.read(treeOid));
