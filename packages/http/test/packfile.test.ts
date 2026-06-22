@@ -28,7 +28,9 @@ describe("buildPackfile / parsePackfile", () => {
 
     expect(parsed).toHaveLength(2);
     for (const object of objects) {
-      const match = parsed.find((parsedObject) => parsedObject.oid === object.oid);
+      const match = parsed.find(
+        (parsedObject) => parsedObject.oid === object.oid,
+      );
       expect(match).toBeDefined();
       expect(match?.type).toBe(object.type);
       expect(match?.content).toEqual(object.content);
@@ -60,7 +62,7 @@ describe("buildPackfile / parsePackfile", () => {
     const packfile = buildPackfile([blob("x")]);
     packfile[0] = 0x00;
 
-    await expect(lastValueFrom(parsePackfile$(packfile, hash))).rejects.toThrow(
+    expect(lastValueFrom(parsePackfile$(packfile, hash))).rejects.toThrow(
       "Invalid packfile magic",
     );
   });
@@ -69,7 +71,7 @@ describe("buildPackfile / parsePackfile", () => {
     const packfile = buildPackfile([blob("x")]);
     packfile[7] = 0x63; // set version to 99
 
-    await expect(lastValueFrom(parsePackfile$(packfile, hash))).rejects.toThrow(
+    expect(lastValueFrom(parsePackfile$(packfile, hash))).rejects.toThrow(
       "Unsupported packfile version",
     );
   });
@@ -78,7 +80,7 @@ describe("buildPackfile / parsePackfile", () => {
     const packfile = buildPackfile([blob("x")]);
     packfile[packfile.length - 1]! ^= 0xff;
 
-    await expect(lastValueFrom(parsePackfile$(packfile, hash))).rejects.toThrow(
+    expect(lastValueFrom(parsePackfile$(packfile, hash))).rejects.toThrow(
       "Packfile checksum mismatch",
     );
   });
@@ -86,7 +88,7 @@ describe("buildPackfile / parsePackfile", () => {
   test("parsePackfile$ errors on truncated packfile", async () => {
     const packfile = buildPackfile([blob("x")]).slice(0, 10);
 
-    await expect(lastValueFrom(parsePackfile$(packfile, hash))).rejects.toThrow(
+    expect(lastValueFrom(parsePackfile$(packfile, hash))).rejects.toThrow(
       "Packfile too small",
     );
   });
@@ -121,7 +123,12 @@ describe("applyDelta", () => {
     const base = new TextEncoder().encode("blob 5\0hello");
     const literal = new TextEncoder().encode("world");
     const expected = literal;
-    const delta = new Uint8Array([base.length, expected.length, literal.length, ...literal]);
+    const delta = new Uint8Array([
+      base.length,
+      expected.length,
+      literal.length,
+      ...literal,
+    ]);
 
     const result = applyDelta(delta, base);
     expect(result).toEqual(expected);
@@ -175,6 +182,8 @@ describe("applyDelta", () => {
     // Header claims result length 1 but no instructions write anything.
     const delta = new Uint8Array([base.length, 1]);
 
-    expect(() => applyDelta(delta, base)).toThrow("Delta result length mismatch");
+    expect(() => applyDelta(delta, base)).toThrow(
+      "Delta result length mismatch",
+    );
   });
 });
