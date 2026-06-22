@@ -12,7 +12,10 @@ import {
 describe("MemoryBackend", () => {
   test("stores and retrieves objects", async () => {
     const backend = new MemoryBackend();
-    const object = Sha1Hash.hashObject("blob", new TextEncoder().encode("data"));
+    const object = Sha1Hash.hashObject(
+      "blob",
+      new TextEncoder().encode("data"),
+    );
 
     await lastValueFrom(backend.writeObject(object));
     const read = await lastValueFrom(backend.readObject(object.oid));
@@ -25,8 +28,10 @@ describe("MemoryBackend", () => {
   test("throws NotFoundError for missing objects", async () => {
     const backend = new MemoryBackend();
 
-    await expect(
-      lastValueFrom(backend.readObject("0000000000000000000000000000000000000000" as Oid)),
+    expect(
+      lastValueFrom(
+        backend.readObject("0000000000000000000000000000000000000000" as Oid),
+      ),
     ).rejects.toThrow(NotFoundError);
   });
 
@@ -55,7 +60,10 @@ describe("MemoryRefStore", () => {
     await lastValueFrom(refs.write("refs/tags/v1", "c"));
 
     const branches = await lastValueFrom(refs.list("refs/heads/"));
-    expect(branches.map((r) => r.name)).toEqual(["refs/heads/dev", "refs/heads/main"]);
+    expect(branches.map((r) => r.name)).toEqual([
+      "refs/heads/dev",
+      "refs/heads/main",
+    ]);
   });
 });
 
@@ -92,17 +100,28 @@ describe("MemoryIndexStore", () => {
 describe("MemoryWorkspaceBackend", () => {
   test("writes and reads files", async () => {
     const workspace = new MemoryWorkspaceBackend();
-    await lastValueFrom(workspace.writeFile("a.txt", new TextEncoder().encode("hello")));
+    await lastValueFrom(
+      workspace.writeFile("a.txt", new TextEncoder().encode("hello")),
+    );
 
-    const content = new TextDecoder().decode(await lastValueFrom(workspace.readFile("a.txt")));
+    const content = new TextDecoder().decode(
+      await lastValueFrom(workspace.readFile("a.txt")),
+    );
     expect(content).toBe("hello");
   });
 
   test("lists files", async () => {
     const workspace = new MemoryWorkspaceBackend();
-    await lastValueFrom(workspace.writeFile("b.txt", new TextEncoder().encode("b")));
-    await lastValueFrom(workspace.writeFile("a.txt", new TextEncoder().encode("a")));
+    await lastValueFrom(
+      workspace.writeFile("b.txt", new TextEncoder().encode("b")),
+    );
+    await lastValueFrom(
+      workspace.writeFile("a.txt", new TextEncoder().encode("a")),
+    );
 
-    expect(await lastValueFrom(workspace.listFiles())).toEqual(["a.txt", "b.txt"]);
+    expect(await lastValueFrom(workspace.listFiles())).toEqual([
+      "a.txt",
+      "b.txt",
+    ]);
   });
 });
