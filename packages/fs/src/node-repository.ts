@@ -1,7 +1,17 @@
 import { Repository, type RepositoryOptions } from "@slim-git/core";
 import { mkdir, stat } from "node:fs/promises";
 import { join } from "node:path";
-import { concatMap, from, lastValueFrom, map, type Observable } from "rxjs";
+import {
+  catchError,
+  concatMap,
+  forkJoin,
+  from,
+  map,
+  of,
+  type Observable,
+  throwError,
+} from "rxjs";
+import { isNodeNotFoundError } from "./node-utils.js";
 import { NodeConfig } from "./node-config.js";
 import { NodeIndexStore } from "./node-index-store.js";
 import { NodeRefStore } from "./node-ref-store.js";
@@ -26,31 +36,26 @@ export const initNodeRepository = (
 ): Observable<Repository> => {
   const gitDir = join(path, ".git");
   const branch = options.initialBranch ?? "main";
+  const refs = new NodeRefStore(gitDir);
+  const config = new NodeConfig(join(gitDir, "config"));
 
-  return from(initializeGitDir(gitDir)).pipe(
-    concatMap(() => {
-      const refs = new NodeRefStore(gitDir);
-      const config = new NodeConfig(join(gitDir, "config"));
-
-      return from(
-        Promise.all([
-          lastValueFrom(refs.write("HEAD", `ref: refs/heads/${branch}`)),
-          lastValueFrom(config.set("core", "repositoryformatversion", "0")),
-          lastValueFrom(config.set("core", "filemode", "true")),
-        ]),
-      ).pipe(
-        map(() =>
-          Repository.init(new NodeStorageBackend(gitDir), {
-            ...options,
-            refs,
-            index: new NodeIndexStore(gitDir),
-            workspace: new NodeWorkspaceBackend(path),
-            config,
-          }),
-        ),
-      );
-    }),
-    concatMap((repo$) => repo$),
+  return initializeGitDir$(gitDir).pipe(
+    concatMap(() =>
+      forkJoin([
+        refs.write("HEAD", `ref: refs/heads/${branch}`),
+        config.set("core", "repositoryformatversion", "0"),
+        config.set("core", "filemode", "true"),
+      ]),
+    ),
+    concatMap(() =>
+      Repository.init(new NodeStorageBackend(gitDir), {
+        ...options,
+        refs,
+        index: new NodeIndexStore(gitDir),
+        workspace: new NodeWorkspaceBackend(path),
+        config,
+      }),
+    ),
   );
 };
 
@@ -63,12 +68,12 @@ export const openNodeRepository = (
   path: string,
   options: RepositoryOptions = {},
 ): Observable<Repository> =>
-  from(resolveGitDir(path)).pipe(
+  resolveGitDir$(path).pipe(
     map((gitDir) => ({
       gitDir,
       worktree: gitDir.endsWith("/.git") ? gitDir.slice(0, -5) : path,
     })),
-    map(({ gitDir, worktree }) =>
+    concatMap(({ gitDir, worktree }) =>
       Repository.open(new NodeStorageBackend(gitDir), {
         ...options,
         refs: new NodeRefStore(gitDir),
@@ -77,32 +82,38 @@ export const openNodeRepository = (
         config: new NodeConfig(join(gitDir, "config")),
       }),
     ),
-    concatMap((repo$) => repo$),
   );
 
 /** Creates the standard `.git` subdirectories. */
-const initializeGitDir = async (gitDir: string): Promise<void> => {
-  await mkdir(join(gitDir, "objects"), { recursive: true });
-  await mkdir(join(gitDir, "refs", "heads"), { recursive: true });
-  await mkdir(join(gitDir, "refs", "tags"), { recursive: true });
-};
+const initializeGitDir$ = (gitDir: string): Observable<unknown> =>
+  from(mkdir(join(gitDir, "objects"), { recursive: true })).pipe(
+    concatMap(() => from(mkdir(join(gitDir, "refs", "heads"), { recursive: true }))),
+    concatMap(() => from(mkdir(join(gitDir, "refs", "tags"), { recursive: true }))),
+    map(() => ({})),
+  );
 
 /** Resolves the `.git` directory from a working tree or bare git path. */
-const resolveGitDir = async (path: string): Promise<string> => {
+const resolveGitDir$ = (path: string): Observable<string> => {
   const gitDir = join(path, ".git");
-  try {
-    const info = await stat(gitDir);
-    if (info.isDirectory()) return gitDir;
-  } catch {
-    // fall through
-  }
 
-  try {
-    const info = await stat(path);
-    if (info.isDirectory()) return path;
-  } catch {
-    // fall through
-  }
-
-  throw new Error(`Not a git repository: ${path}`);
+  return directoryExists$(gitDir).pipe(
+    concatMap((hasGitDir) => {
+      if (hasGitDir) return of(gitDir);
+      return directoryExists$(path).pipe(
+        concatMap((exists) =>
+          exists ? of(path) : throwError(() => new Error(`Not a git repository: ${path}`)),
+        ),
+      );
+    }),
+  );
 };
+
+/** Emits true if `path` exists and is a directory. */
+const directoryExists$ = (path: string): Observable<boolean> =>
+  from(stat(path)).pipe(
+    map((info) => info.isDirectory()),
+    catchError((error) => {
+      if (isNodeNotFoundError(error)) return of(false);
+      return throwError(() => error);
+    }),
+  );
