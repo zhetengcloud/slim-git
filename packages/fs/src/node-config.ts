@@ -16,14 +16,14 @@ import {
  * The key is stored in the dotted form used by the `Config` interface
  * (e.g. `origin.url`), not the Git file format.
  */
-interface ConfigEntry {
+export interface ConfigEntry {
   readonly section: string;
   readonly key: string;
   readonly value: string;
 }
 
 /** Checks whether an unknown value is a Node.js ENOENT error. */
-const isNodeNotFoundError = (error: unknown): boolean =>
+export const isNodeNotFoundError = (error: unknown): boolean =>
   typeof error === "object" &&
   error !== null &&
   "code" in error &&
@@ -78,7 +78,7 @@ export class NodeConfig implements Config {
 }
 
 /** Reads the config file, returning an empty array if it does not exist. */
-const readConfigEntries = (path: string): Observable<readonly ConfigEntry[]> =>
+export const readConfigEntries = (path: string): Observable<readonly ConfigEntry[]> =>
   from(readFile(path, "utf-8")).pipe(
     map((text) => parseConfig(text)),
     catchError((error) => {
@@ -90,7 +90,7 @@ const readConfigEntries = (path: string): Observable<readonly ConfigEntry[]> =>
   );
 
 /** Returns a new entries array with the given entry inserted or updated. */
-const replaceEntry = (
+export const replaceEntry = (
   entries: readonly ConfigEntry[],
   entry: ConfigEntry,
 ): readonly ConfigEntry[] => {
@@ -107,7 +107,7 @@ const replaceEntry = (
 };
 
 /** Writes serialized config entries to the file, creating parent directories. */
-const writeConfigEntries = (
+export const writeConfigEntries = (
   path: string,
   entries: readonly ConfigEntry[],
 ): Observable<void> =>
@@ -116,7 +116,7 @@ const writeConfigEntries = (
   );
 
 /** Parses a Git config file into flat Config entries. */
-const parseConfig = (text: string): ConfigEntry[] => {
+export const parseConfig = (text: string): ConfigEntry[] => {
   const entries: ConfigEntry[] = [];
   let currentSection: string | undefined;
   let currentSubsection: string | undefined;
@@ -145,7 +145,7 @@ const parseConfig = (text: string): ConfigEntry[] => {
 };
 
 /** Removes inline comments from a config line. */
-const stripComment = (line: string): string => {
+export const stripComment = (line: string): string => {
   let inQuote = false;
   for (let i = 0; i < line.length; i++) {
     const char = line[i];
@@ -159,7 +159,7 @@ const stripComment = (line: string): string => {
 };
 
 /** Strips matching outer quotes from a value. */
-const unquote = (value: string): string => {
+export const unquote = (value: string): string => {
   if (value.length >= 2 && value.startsWith('"') && value.endsWith('"')) {
     return value.slice(1, -1);
   }
@@ -167,7 +167,7 @@ const unquote = (value: string): string => {
 };
 
 /** Serializes flat Config entries into a Git config file. */
-const serializeConfig = (entries: readonly ConfigEntry[]): string => {
+export const serializeConfig = (entries: readonly ConfigEntry[]): string => {
   const groups = groupEntries(entries);
   const lines: string[] = [];
 
@@ -192,7 +192,7 @@ const serializeConfig = (entries: readonly ConfigEntry[]): string => {
 };
 
 /** Groups entries by section, then by subsection, preserving input order. */
-const groupEntries = (
+export const groupEntries = (
   entries: readonly ConfigEntry[],
 ): Map<string, Map<string, [string, string][]>> => {
   const groups = new Map<string, Map<string, [string, string][]>>();
@@ -213,7 +213,7 @@ const groupEntries = (
 };
 
 /** Quotes a value if it contains whitespace or special characters. */
-const quoteIfNeeded = (value: string): string => {
+export const quoteIfNeeded = (value: string): string => {
   if (value === "" || /\s|[#;]/.test(value)) {
     return `"${value.replace(/"/g, '\\"')}"`;
   }
