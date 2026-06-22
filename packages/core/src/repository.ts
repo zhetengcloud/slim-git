@@ -34,10 +34,11 @@ import { ObjectStore } from "./object-store.js";
 import type { RefStore } from "./ref-store.js";
 import { TreeBuilder } from "./tree-builder.js";
 import type { TreeEntryMap } from "./tree-utils.js";
-import { findInTree$, flattenTree$, readCommitTree$ } from "./tree-utils.js";
+import { flattenTree$, readCommitTree$ } from "./tree-utils.js";
 import { RefService, type RefCreateOptions } from "./ref-service.js";
+import { StatusService } from "./status-service.js";
+import { StagingService } from "./staging-service.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
-import { isIgnored, parseGitignore, type GitignorePattern } from "./gitignore.js";
 import { diffHeadRef, diffIndexHead, diffWorktreeIndex } from "./repository-diff.js";
 import { fastForwardMerge, merge, type MergeOptions } from "./repository-merge.js";
 import {
@@ -78,11 +79,6 @@ export interface CommitOptions {
   readonly committer?: Person;
 }
 
-
-
-/** Default file mode used for regular files staged into the index. */
-const DefaultFileMode = 0o100644;
-
 /**
  * Creates an index entry from a workspace file.
  * Timestamps are set to the current time; device/inode fields are zeroed because
@@ -95,7 +91,7 @@ const createIndexEntry = (path: string, oid: Oid, content: Uint8Array): IndexEnt
   return {
     path,
     oid,
-    mode: DefaultFileMode,
+    mode: 0o100644,
     stage: 0,
     fileSize: content.length,
     ctimeSeconds: timestampSeconds,
@@ -130,6 +126,8 @@ export class Repository {
   readonly config: Config;
 
   private readonly refService: RefService;
+  private readonly statusService: StatusService;
+  private readonly stagingService: StagingService;
 
   private constructor(
     readonly backend: StorageBackend,
@@ -145,6 +143,13 @@ export class Repository {
     this.workspace = workspace;
     this.config = config;
     this.refService = new RefService(refs);
+    this.statusService = new StatusService(
+      this.objectStore,
+      indexStore,
+      workspace,
+      this.refService,
+    );
+    this.stagingService = new StagingService(this.objectStore, indexStore, workspace);
   }
 
   /** Creates a fresh repository instance backed by the given storage backend. */
@@ -199,54 +204,7 @@ export class Repository {
    * - `untracked` — workspace files not present in the index.
    */
   status(): Observable<Status> {
-    return combineLatest([
-      this.indexStore.read(),
-      this.workspace.listFiles(),
-      this.readHeadTree$(),
-      this.readGitignore$(),
-    ]).pipe(
-      concatMap(([index, workspaceFiles, headTree, ignorePatterns]) =>
-        this.computeStaged$(index, headTree).pipe(
-          concatMap((staged) =>
-            this.computeTrackedChanges$(index).pipe(map((changes) => ({ staged, ...changes }))),
-          ),
-          map(({ staged, modified, deleted }) => {
-            const tracked = new Set(index.paths);
-            const untracked = workspaceFiles.filter(
-              (path) => !tracked.has(path) && !isIgnored(path, ignorePatterns),
-            );
-            return { staged, modified, deleted, untracked };
-          }),
-        ),
-      ),
-    );
-  }
-
-  /** Reads HEAD and returns the tree oid of the commit it points to, if any. */
-  private readHeadTree$(): Observable<Oid | undefined> {
-    return this.resolveRef("HEAD").pipe(
-      concatMap((head) => {
-        if (head === undefined) {
-          return of(undefined);
-        }
-        return this.readCommitTree$(head);
-      }),
-    );
-  }
-
-  /** Reads `.gitignore` from the workspace and parses it into ordered rules. */
-  private readGitignore$(): Observable<readonly GitignorePattern[]> {
-    return this.workspace.exists(".gitignore").pipe(
-      concatMap((exists) => {
-        if (!exists) {
-          return of("");
-        }
-        return this.workspace
-          .readFile(".gitignore")
-          .pipe(map((content) => new TextDecoder().decode(content)));
-      }),
-      map((content) => parseGitignore(content)),
-    );
+    return this.statusService.status();
   }
 
   /** Reads a commit object and returns the oid of its tree. */
@@ -254,131 +212,19 @@ export class Repository {
     return readCommitTree$(this.objectStore, oid);
   }
 
-  /** Computes modified/deleted changes for all tracked paths. */
-  private computeTrackedChanges$(
-    index: Index,
-  ): Observable<{ modified: string[]; deleted: string[] }> {
-    if (index.paths.length === 0) {
-      return of({ modified: [], deleted: [] });
-    }
-
-    return forkJoin(
-      index.paths.map((path) =>
-        this.workspace.exists(path).pipe(
-          concatMap((exists) => {
-            if (!exists) {
-              return of({ path, kind: "deleted" as const });
-            }
-            return this.workspace.readFile(path).pipe(
-              map((content) => {
-                const blob = this.objectStore.hashObject("blob", content);
-                return blob.oid !== index.get(path)?.oid
-                  ? { path, kind: "modified" as const }
-                  : undefined;
-              }),
-            );
-          }),
-        ),
-      ),
-    ).pipe(
-      map((changes) => ({
-        modified: changes
-          .filter((change) => change?.kind === "modified")
-          .map((change) => change!.path),
-        deleted: changes
-          .filter((change) => change?.kind === "deleted")
-          .map((change) => change!.path),
-      })),
-    );
-  }
-
-  /**
-   * Computes staged paths by comparing each index entry to its counterpart
-   * in the HEAD tree. When there is no HEAD, every path is considered staged.
-   */
-  private computeStaged$(index: Index, headTree: Oid | undefined): Observable<string[]> {
-    if (headTree === undefined || index.paths.length === 0) {
-      return of(index.paths);
-    }
-
-    return forkJoin(
-      index.paths.map((path) => {
-        const entry = index.get(path);
-        if (entry === undefined) {
-          return of(undefined);
-        }
-        return findInTree$(this.objectStore, headTree, path.split("/").filter(Boolean)).pipe(
-          map((headEntry) => (headEntry?.oid !== entry.oid ? path : undefined)),
-        );
-      }),
-    ).pipe(map((changes) => changes.filter((path): path is string => path !== undefined)));
-  }
-
   /** Stages workspace files as blobs in the index, skipping ignored paths. */
   add(paths: readonly string[]): Observable<AddResult> {
-    return combineLatest([this.indexStore.read(), this.readGitignore$()]).pipe(
-      concatMap(([index, ignorePatterns]) => {
-        const allowedPaths = paths.filter((path) => !isIgnored(path, ignorePatterns));
-        return allowedPaths
-          .reduce<Observable<Index>>(
-            (index$, path) =>
-              index$.pipe(
-                concatMap((currentIndex) =>
-                  this.workspace.readFile(path).pipe(
-                    concatMap((content) =>
-                      this.objectStore
-                        .write("blob", content)
-                        .pipe(map((blob) => ({ blob, content }))),
-                    ),
-                    map(({ blob, content }) =>
-                      currentIndex.add(createIndexEntry(path, blob.oid, content)),
-                    ),
-                  ),
-                ),
-              ),
-            of(index),
-          )
-          .pipe(
-            concatMap((next) => this.indexStore.write(next)),
-            map(() => ({ added: allowedPaths })),
-          );
-      }),
-    );
+    return this.stagingService.add(paths);
   }
 
   /** Removes files from both the workspace and the index. */
   remove(paths: readonly string[]): Observable<RemoveResult> {
-    return this.indexStore.read().pipe(
-      concatMap((index) =>
-        forkJoin(paths.map((path) => this.workspace.removeFile(path))).pipe(
-          defaultIfEmpty([]),
-          map(() => index.removeMany(paths)),
-        ),
-      ),
-      concatMap((next) => this.indexStore.write(next)),
-      map(() => ({ removed: paths })),
-    );
+    return this.stagingService.remove(paths);
   }
 
   /** Writes the indexed version of each path back into the workspace. */
   restore(paths: readonly string[]): Observable<RestoreResult> {
-    return this.indexStore.read().pipe(
-      concatMap((index) =>
-        forkJoin(
-          paths.map((path) => {
-            const entry = index.get(path);
-            if (entry === undefined) {
-              return of(undefined);
-            }
-            return this.objectStore
-              .read(entry.oid)
-              .pipe(concatMap((object) => this.workspace.writeFile(path, object.content)));
-          }),
-        ),
-      ),
-      defaultIfEmpty([]),
-      map(() => ({ restored: paths })),
-    );
+    return this.stagingService.restore(paths);
   }
 
   /**
