@@ -38,12 +38,7 @@ import { HistoryService } from "./history-service.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
 import { diffHeadRef, diffIndexHead, diffWorktreeIndex } from "./repository-diff.js";
 import { fastForwardMerge, merge, type MergeOptions } from "./repository-merge.js";
-import {
-  addRemote,
-  listRemotes,
-  removeRemote,
-  type RemoveRemoteResult,
-} from "./repository-remotes.js";
+import { RemoteService, type RemoveRemoteResult } from "./remote-service.js";
 import { fetch, pull, push, type FetchOptions } from "./repository-fetch.js";
 import type { Transport } from "./transport.js";
 import { of, type Observable } from "rxjs";
@@ -81,6 +76,7 @@ export class Repository {
   private readonly commitService: CommitService;
   private readonly historyService: HistoryService;
   private readonly checkoutService: CheckoutService;
+  private readonly remoteService: RemoteService;
 
   private constructor(
     readonly backend: StorageBackend,
@@ -106,6 +102,7 @@ export class Repository {
     this.commitService = new CommitService(this.objectStore, indexStore, this.refService);
     this.historyService = new HistoryService(this.objectStore, this.refService);
     this.checkoutService = new CheckoutService(this.objectStore, refs, indexStore, workspace);
+    this.remoteService = new RemoteService(config);
   }
 
   /** Creates a fresh repository instance backed by the given storage backend. */
@@ -279,17 +276,17 @@ export class Repository {
 
   /** Adds a remote repository. */
   addRemote(name: string, url: string): Observable<Remote> {
-    return addRemote(this.config, name, url);
+    return this.remoteService.addRemote(name, url);
   }
 
   /** Removes a remote repository and its configuration. */
   removeRemote(name: string): Observable<RemoveRemoteResult> {
-    return removeRemote(this.config, name);
+    return this.remoteService.removeRemote(name);
   }
 
   /** Lists all configured remotes sorted by name. */
   listRemotes(): Observable<Remote[]> {
-    return listRemotes(this.config);
+    return this.remoteService.listRemotes();
   }
 
   /** Performs a fast-forward merge of the current branch to `target`. */

@@ -22,7 +22,7 @@ export * from "./ref-store.js";
 export * from "./repository.js";
 export * from "./repository-diff.js";
 export * from "./repository-merge.js";
-export * from "./repository-remotes.js";
+export * from "./remote-service.js";
 export * from "./repository-fetch.js";
 export * from "./transport.js";
 export * from "./tree-builder.js";

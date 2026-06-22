@@ -1,3 +1,4 @@
+import type { Remote } from "@slim-git/types";
 import {
   concatMap,
   defaultIfEmpty,
@@ -8,29 +9,12 @@ import {
   toArray,
   type Observable,
 } from "rxjs";
-import type { Remote } from "@slim-git/types";
 import type { Config } from "./config.js";
-
-/** Adds a remote repository. */
-export const addRemote = (config: Config, name: string, url: string): Observable<Remote> =>
-  config.set("remote", `${name}.url`, url).pipe(map(() => ({ name, url })));
 
 /** Result of removing a remote. */
 export interface RemoveRemoteResult {
   readonly removed: number;
 }
-
-/** Removes a remote repository and its configuration. */
-export const removeRemote = (config: Config, name: string): Observable<RemoveRemoteResult> =>
-  config.list("remote").pipe(
-    concatMap((entries) => {
-      const keys = entries.filter(([key]) => key.startsWith(`${name}.`)).map(([key]) => key);
-      return forkJoin(keys.map((key) => config.remove("remote", key))).pipe(
-        defaultIfEmpty([]),
-        map(() => ({ removed: keys.length })),
-      );
-    }),
-  );
 
 /** Remote config keys that contribute to a {@link Remote}. */
 type RemoteProperty = "url" | "pushurl";
@@ -46,6 +30,47 @@ interface RemoteUrlEntry {
 interface RemoteUrlGroup {
   readonly url?: string;
   readonly pushUrl?: string;
+}
+
+/**
+ * Remote configuration management.
+ *
+ * This service keeps remote-related logic out of the main `Repository` facade.
+ */
+export class RemoteService {
+  constructor(private readonly config: Config) {}
+
+  /** Adds a remote repository. */
+  addRemote(name: string, url: string): Observable<Remote> {
+    return this.config.set("remote", `${name}.url`, url).pipe(map(() => ({ name, url })));
+  }
+
+  /** Removes a remote repository and its configuration. */
+  removeRemote(name: string): Observable<RemoveRemoteResult> {
+    return this.config.list("remote").pipe(
+      concatMap((entries) => {
+        const keys = entries.filter(([key]) => key.startsWith(`${name}.`)).map(([key]) => key);
+        return forkJoin(keys.map((key) => this.config.remove("remote", key))).pipe(
+          defaultIfEmpty([]),
+          map(() => ({ removed: keys.length })),
+        );
+      }),
+    );
+  }
+
+  /** Lists all configured remotes in the order returned by the config store. */
+  listRemotes(): Observable<Remote[]> {
+    return this.config.list("remote").pipe(
+      concatMap((entries) => from(entries)),
+      concatMap((entry) => extractRemoteUrlEntry(entry)),
+      reduce(updateRemoteGroup, {} as Record<string, RemoteUrlGroup>),
+      concatMap((groups) => from(Object.entries(groups))),
+      concatMap(([name, group]) =>
+        group.url === undefined ? [] : [{ name, url: group.url, pushUrl: group.pushUrl }],
+      ),
+      toArray(),
+    );
+  }
 }
 
 /**
@@ -78,16 +103,3 @@ const updateRemoteGroup = (
   [name]:
     property === "url" ? { ...groups[name], url: value } : { ...groups[name], pushUrl: value },
 });
-
-/** Lists all configured remotes in the order returned by the config store. */
-export const listRemotes = (config: Config): Observable<Remote[]> =>
-  config.list("remote").pipe(
-    concatMap((entries) => from(entries)),
-    concatMap((entry) => extractRemoteUrlEntry(entry)),
-    reduce(updateRemoteGroup, {} as Record<string, RemoteUrlGroup>),
-    concatMap((groups) => from(Object.entries(groups))),
-    concatMap(([name, group]) =>
-      group.url === undefined ? [] : [{ name, url: group.url, pushUrl: group.pushUrl }],
-    ),
-    toArray(),
-  );
