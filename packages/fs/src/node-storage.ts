@@ -9,7 +9,7 @@ import type { GitObject, Oid } from "@slim-git/types";
 import { createInflate, createDeflate } from "node:zlib";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
-import { catchError, concatMap, from, map, type Observable, throwError } from "rxjs";
+import { catchError, concatMap, from, map, Observable, throwError } from "rxjs";
 import { fileExists, isNodeNotFoundError, writeFileEnsuringDir$ } from "./node-utils.js";
 
 /**
@@ -26,7 +26,7 @@ export class NodeStorageBackend implements StorageBackend {
 
   readObject(oid: Oid): Observable<GitObject> {
     return from(readFile(this.objectPath(oid))).pipe(
-      concatMap((buffer) => inflateBytes(new Uint8Array(buffer))),
+      concatMap((buffer) => inflateBytes$(new Uint8Array(buffer))),
       map((raw) => {
         const { type, content } = parseObjectBytes(raw);
         return { type, content, oid };
@@ -42,7 +42,7 @@ export class NodeStorageBackend implements StorageBackend {
 
   writeObject(object: GitObject): Observable<GitObject> {
     const bytes = buildObjectBytes(object.type, object.content);
-    return from(deflateBytes(bytes)).pipe(
+    return deflateBytes$(bytes).pipe(
       concatMap((compressed) =>
         writeFileEnsuringDir$(this.objectPath(object.oid), compressed),
       ),
@@ -61,27 +61,33 @@ export class NodeStorageBackend implements StorageBackend {
 }
 
 /** Zlib-deflates a Uint8Array. */
-const deflateBytes = (data: Uint8Array): Promise<Uint8Array> =>
-  new Promise((resolve, reject) => {
+const deflateBytes$ = (data: Uint8Array): Observable<Uint8Array> =>
+  new Observable((subscriber) => {
     const deflate = createDeflate();
     const chunks: Uint8Array[] = [];
 
     deflate.on("data", (chunk: Uint8Array) => chunks.push(chunk));
-    deflate.on("end", () => resolve(concatChunks(chunks)));
-    deflate.on("error", reject);
+    deflate.on("end", () => {
+      subscriber.next(concatChunks(chunks));
+      subscriber.complete();
+    });
+    deflate.on("error", (error) => subscriber.error(error));
 
     deflate.end(data);
   });
 
 /** Zlib-inflates a Uint8Array. */
-const inflateBytes = (data: Uint8Array): Promise<Uint8Array> =>
-  new Promise((resolve, reject) => {
+const inflateBytes$ = (data: Uint8Array): Observable<Uint8Array> =>
+  new Observable((subscriber) => {
     const inflate = createInflate();
     const chunks: Uint8Array[] = [];
 
     inflate.on("data", (chunk: Uint8Array) => chunks.push(chunk));
-    inflate.on("end", () => resolve(concatChunks(chunks)));
-    inflate.on("error", reject);
+    inflate.on("end", () => {
+      subscriber.next(concatChunks(chunks));
+      subscriber.complete();
+    });
+    inflate.on("error", (error) => subscriber.error(error));
 
     inflate.end(data);
   });
