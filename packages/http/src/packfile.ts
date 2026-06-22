@@ -1,5 +1,12 @@
-import type { GitObject, ObjectType, Oid } from "@slim-git/types";
-import type { HashAlgorithm } from "@slim-git/core";
+import type { GitObject, Oid } from "@slim-git/types";
+import {
+  buildObjectBytes,
+  concatBytes,
+  parseObjectBytes,
+  readUint32,
+  type HashAlgorithm,
+  writeUint32,
+} from "@slim-git/core";
 import { createHash } from "node:crypto";
 import { deflateSync, Inflate } from "node:zlib";
 
@@ -21,62 +28,6 @@ const PackVersion = 2;
 
 /** SHA-1 checksum length in bytes. */
 const ChecksumLength = 20;
-
-/** Builds the canonical on-disk representation of a Git object. */
-const encodeObjectBytes = (type: ObjectType, content: Uint8Array): Uint8Array => {
-  const header = new TextEncoder().encode(`${type} ${content.length}\0`);
-  const result = new Uint8Array(header.length + content.length);
-  result.set(header);
-  result.set(content, header.length);
-  return result;
-};
-
-/**
- * Parses the canonical `<type> <size>\0<content>` bytes of a Git object.
- *
- * Throws if the header is malformed or the size does not match the content.
- */
-const parseObjectBytes = (
-  raw: Uint8Array,
-): { readonly type: ObjectType; readonly content: Uint8Array } => {
-  const spaceIndex = raw.indexOf(0x20);
-  const nullIndex = raw.indexOf(0x00, spaceIndex + 1);
-
-  if (spaceIndex === -1 || nullIndex === -1) {
-    throw new Error("Invalid object header");
-  }
-
-  const typeText = new TextDecoder().decode(raw.slice(0, spaceIndex));
-  const sizeText = new TextDecoder().decode(raw.slice(spaceIndex + 1, nullIndex));
-  const size = Number.parseInt(sizeText, 10);
-  const content = raw.slice(nullIndex + 1);
-
-  if (Number.isNaN(size) || content.length !== size) {
-    throw new Error("Object size mismatch");
-  }
-
-  const type = typeText as ObjectType;
-  return { type, content };
-};
-
-/** Concatenates two Uint8Arrays. */
-const concatBytes = (a: Uint8Array, b: Uint8Array): Uint8Array => {
-  const result = new Uint8Array(a.length + b.length);
-  result.set(a);
-  result.set(b, a.length);
-  return result;
-};
-
-/** Reads a big-endian unsigned 32-bit integer from a buffer. */
-const readUInt32 = (buffer: Uint8Array, offset: number): number =>
-  (buffer[offset]! << 24) |
-  (buffer[offset + 1]! << 16) |
-  (buffer[offset + 2]! << 8) |
-  buffer[offset + 3]!;
-
-/** Writes a big-endian unsigned 32-bit integer into a buffer. */
-const writeUInt32 = (value: number): Uint8Array =>
-  new Uint8Array([(value >> 24) & 0xff, (value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff]);
 
 /**
  * Encodes a packfile object header (type + size) as a variable-length integer.
@@ -281,7 +232,7 @@ export const applyDelta = (delta: Uint8Array, base: Uint8Array): Uint8Array => {
  */
 export const buildPackfile = (objects: readonly GitObject[]): Uint8Array => {
   const entries = objects.map((object) => ({
-    raw: encodeObjectBytes(object.type, object.content),
+    raw: buildObjectBytes(object.type, object.content),
     type: object.type,
     oid: object.oid,
   }));
@@ -307,8 +258,8 @@ export const buildPackfile = (objects: readonly GitObject[]): Uint8Array => {
 
   const header = new Uint8Array(PackMagic.length + 8);
   header.set(PackMagic);
-  header.set(writeUInt32(PackVersion), PackMagic.length);
-  header.set(writeUInt32(entries.length), PackMagic.length + 4);
+  header.set(writeUint32(PackVersion), PackMagic.length);
+  header.set(writeUint32(entries.length), PackMagic.length + 4);
 
   const checksum = createHash("sha1")
     .update(Buffer.from(header))
@@ -343,12 +294,12 @@ export const parsePackfile = async (
     }
   }
 
-  const version = readUInt32(buffer, PackMagic.length);
+  const version = readUint32(buffer, PackMagic.length);
   if (version !== PackVersion) {
     throw new Error(`Unsupported packfile version: ${version}`);
   }
 
-  const objectCount = readUInt32(buffer, PackMagic.length + 4);
+  const objectCount = readUint32(buffer, PackMagic.length + 4);
   const checksumOffset = buffer.length - ChecksumLength;
 
   const expectedChecksum = buffer.slice(checksumOffset);
@@ -398,7 +349,7 @@ export const parsePackfile = async (
       if (baseObject === undefined) {
         throw new Error(`Missing REF_DELTA base ${baseOid}`);
       }
-      raw = applyDelta(data, encodeObjectBytes(baseObject.type, baseObject.content));
+      raw = applyDelta(data, buildObjectBytes(baseObject.type, baseObject.content));
     } else {
       raw = data;
     }

@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { GitObject, HashAlgorithmName, ObjectType, Oid } from "@slim-git/types";
+import { buildObjectBytes, bytesToHex } from "./bytes.js";
 
 /** Hash algorithm abstraction used by the object store. */
 export interface HashAlgorithm {
@@ -8,39 +9,12 @@ export interface HashAlgorithm {
   hashObject(type: ObjectType, content: Uint8Array): GitObject;
 }
 
-/** Builds the Git object header: `<type> <size>\0`. */
-const encodeHeader = (type: ObjectType, size: number): Uint8Array => {
-  const header = `${type} ${size}\0`;
-  return new TextEncoder().encode(header);
-};
-
-/** Concatenates two Uint8Arrays into a new one. */
-const concatBytes = (a: Uint8Array, b: Uint8Array): Uint8Array => {
-  const result = new Uint8Array(a.length + b.length);
-  result.set(a);
-  result.set(b, a.length);
-  return result;
-};
-
-/**
- * A Git object's canonical bytes are `<type> <size>\0` followed by the raw content.
- * These bytes are what get hashed to produce the object's oid.
- */
-const buildObjectBytes = (type: ObjectType, content: Uint8Array): Uint8Array =>
-  concatBytes(encodeHeader(type, content.length), content);
-
-/** Converts raw hash bytes into a lowercase hex oid string. */
-const toHex = (bytes: Uint8Array): Oid =>
-  Array.from(bytes)
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("") as Oid;
-
 /** Factory for SHA-1 or SHA-256 Git hash algorithms. */
 const createGitHash = (algorithm: "sha1" | "sha256") => {
   const digest = (data: Uint8Array): Oid => {
     const hash = createHash(algorithm);
     hash.update(data);
-    return toHex(new Uint8Array(hash.digest())) as Oid;
+    return bytesToHex(new Uint8Array(hash.digest())) as Oid;
   };
 
   return {

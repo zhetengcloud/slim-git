@@ -1,3 +1,5 @@
+import { concatBytes } from "@slim-git/core";
+
 /**
  * Git "pkt-line" format helpers.
  *
@@ -52,7 +54,7 @@ export const decodePktLines = (
   previousRemainder?: Uint8Array,
 ): DecodedPktLines => {
   const buffer =
-    previousRemainder !== undefined ? concatUint8Arrays(previousRemainder, data) : data;
+    previousRemainder !== undefined ? concatBytes(previousRemainder, data) : data;
 
   const lines: string[] = [];
   let position = 0;
@@ -104,7 +106,7 @@ export const decodePktLineFrames = (
   previousRemainder?: Uint8Array,
 ): DecodedPktFrames => {
   const buffer =
-    previousRemainder !== undefined ? concatUint8Arrays(previousRemainder, data) : data;
+    previousRemainder !== undefined ? concatBytes(previousRemainder, data) : data;
 
   const frames: Uint8Array[] = [];
   let position = 0;
@@ -134,13 +136,6 @@ export const decodePktLineFrames = (
   }
 
   return { frames, remainder: buffer.slice(position) };
-};
-
-const concatUint8Arrays = (a: Uint8Array, b: Uint8Array): Uint8Array => {
-  const result = new Uint8Array(a.length + b.length);
-  result.set(a);
-  result.set(b, a.length);
-  return result;
 };
 
 const stripTrailingLf = (data: Uint8Array): Uint8Array => {

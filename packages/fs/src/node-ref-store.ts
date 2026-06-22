@@ -1,8 +1,9 @@
 import type { RefStore } from "@slim-git/core";
 import type { Ref, RefDeleteResult, RefWriteResult } from "@slim-git/types";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { dirname, join, relative, sep } from "node:path";
-import { catchError, concatMap, from, map, of, type Observable, throwError } from "rxjs";
+import { readFile, readdir, rm } from "node:fs/promises";
+import { join, relative } from "node:path";
+import { catchError, from, map, of, type Observable, throwError } from "rxjs";
+import { isNodeNotFoundError, toUnixPath, writeFileEnsuringDir$ } from "./node-utils.js";
 
 /**
  * Node.js filesystem implementation of `RefStore`.
@@ -26,8 +27,7 @@ export class NodeRefStore implements RefStore {
 
   write(ref: string, target: string): Observable<RefWriteResult> {
     const path = this.refPath(ref);
-    return from(mkdir(dirname(path), { recursive: true })).pipe(
-      concatMap(() => from(writeFile(path, `${target}\n`))),
+    return writeFileEnsuringDir$(path, `${target}\n`).pipe(
       map(() => ({ ref, target })),
     );
   }
@@ -48,10 +48,6 @@ export class NodeRefStore implements RefStore {
     return ref === "HEAD" ? join(this.gitDir, "HEAD") : join(this.gitDir, ref);
   }
 }
-
-/** Checks whether an unknown value is a Node.js ENOENT error. */
-const isNodeNotFoundError = (error: unknown): boolean =>
-  typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 
 /**
  * Lists refs under `refsDir` matching `prefix`, returning full ref names
@@ -75,5 +71,3 @@ const listRefFiles = async (gitDir: string, refsDir: string, prefix: string): Pr
   return refs;
 };
 
-/** Converts a platform path to a forward-slash string. */
-const toUnixPath = (path: string): string => path.split(sep).join("/");

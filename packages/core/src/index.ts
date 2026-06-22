@@ -6,6 +6,7 @@
  */
 export * from "@slim-git/types";
 export * from "./backend.js";
+export * from "./bytes.js";
 export * from "./commit-builder.js";
 export * from "./commit-parser.js";
 export * from "./config.js";

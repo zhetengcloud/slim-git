@@ -12,11 +12,11 @@ import {
   encodeIndexEntry,
   oidToBytes,
   readIndexHeader,
-  readUint16,
-  readUint32,
+  readUint16At,
+  readUint32At,
   writeTimestamp,
-  writeUint16,
-  writeUint32,
+  writeUint16At,
+  writeUint32At,
 } from "@slim-git/fs";
 
 const sampleOid = "3b18e512dba79e4c8300dd08aeb37f8e728b8dad" as Oid;
@@ -126,23 +126,23 @@ describe("index codec", () => {
     expect(bytesToOid(bytes)).toBe(sampleOid);
   });
 
-  test("writeUint32 and readUint32 round-trip", () => {
+  test("writeUint32At and readUint32At round-trip", () => {
     const buffer = new Uint8Array(4);
-    writeUint32(buffer, 0, 0x12345678);
-    expect(readUint32(buffer, 0)).toBe(0x12345678);
+    writeUint32At(buffer, 0, 0x12345678);
+    expect(readUint32At(buffer, 0)).toBe(0x12345678);
   });
 
-  test("writeUint16 and readUint16 round-trip", () => {
+  test("writeUint16At and readUint16At round-trip", () => {
     const buffer = new Uint8Array(2);
-    writeUint16(buffer, 0, 0xabcd);
-    expect(readUint16(buffer, 0)).toBe(0xabcd);
+    writeUint16At(buffer, 0, 0xabcd);
+    expect(readUint16At(buffer, 0)).toBe(0xabcd);
   });
 
   test("writeTimestamp writes seconds then nanoseconds", () => {
     const buffer = new Uint8Array(8);
     writeTimestamp(buffer, 0, 123, 456);
-    expect(readUint32(buffer, 0)).toBe(123);
-    expect(readUint32(buffer, 4)).toBe(456);
+    expect(readUint32At(buffer, 0)).toBe(123);
+    expect(readUint32At(buffer, 4)).toBe(456);
   });
 
   test("computeChecksum produces 20-byte SHA-1", () => {
