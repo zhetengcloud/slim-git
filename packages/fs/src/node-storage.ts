@@ -10,7 +10,7 @@ import { createInflate, createDeflate } from "node:zlib";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { catchError, concatMap, from, map, Observable, throwError } from "rxjs";
-import { fileExists, isNodeNotFoundError, writeFileEnsuringDir$ } from "./node-utils.js";
+import { fileExists$, isNodeNotFoundError, writeFileEnsuringDir$ } from "./node-utils.js";
 
 /**
  * Node.js filesystem implementation of `StorageBackend` using Git's loose-object
@@ -51,7 +51,7 @@ export class NodeStorageBackend implements StorageBackend {
   }
 
   exists(oid: Oid): Observable<boolean> {
-    return from(fileExists(this.objectPath(oid)));
+    return fileExists$(this.objectPath(oid));
   }
 
   /** Maps an oid to its loose-object filesystem path. */

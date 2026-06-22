@@ -3,7 +3,7 @@ import type { WorkspaceRemoveResult, WorkspaceWriteResult } from "@slim-git/type
 import { opendir, readFile, rm } from "node:fs/promises";
 import { join, relative } from "node:path";
 import { from, map, type Observable } from "rxjs";
-import { fileExists, toUnixPath, writeFileEnsuringDir$ } from "./node-utils.js";
+import { fileExists$, toUnixPath, writeFileEnsuringDir$ } from "./node-utils.js";
 
 /**
  * Node.js filesystem implementation of `WorkspaceBackend`.
@@ -35,7 +35,7 @@ export class NodeWorkspaceBackend implements WorkspaceBackend {
   }
 
   exists(path: string): Observable<boolean> {
-    return from(fileExists(this.toAbsolute(path)));
+    return fileExists$(this.toAbsolute(path));
   }
 
   /** Converts a workspace-relative Unix path to an absolute platform path. */

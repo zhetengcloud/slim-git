@@ -4,7 +4,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
-  fileExists,
+  fileExists$,
   isNodeNotFoundError,
   toUnixPath,
   writeFileEnsuringDir$,
@@ -35,19 +35,19 @@ describe("isNodeNotFoundError", () => {
   });
 });
 
-describe("fileExists", () => {
+describe("fileExists$", () => {
   test("returns true for existing files", async () => {
     await withTempDir(async (dir) => {
       const path = join(dir, "file");
       await writeFile(path, "hi");
 
-      expect(await fileExists(path)).toBe(true);
+      expect(await lastValueFrom(fileExists$(path))).toBe(true);
     });
   });
 
   test("returns false for missing files", async () => {
     await withTempDir(async (dir) => {
-      expect(await fileExists(join(dir, "missing"))).toBe(false);
+      expect(await lastValueFrom(fileExists$(join(dir, "missing")))).toBe(false);
     });
   });
 });

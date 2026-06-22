@@ -1,6 +1,6 @@
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { dirname, sep } from "node:path";
-import { concatMap, from, type Observable } from "rxjs";
+import { catchError, concatMap, from, map, type Observable, of, throwError } from "rxjs";
 
 /**
  * Checks whether an unknown value is a Node.js ENOENT error.
@@ -19,15 +19,13 @@ export const isNodeNotFoundError = (error: unknown): boolean =>
  *
  * Returns `false` for missing files without throwing.
  */
-export const fileExists = async (path: string): Promise<boolean> => {
-  try {
-    await stat(path);
-    return true;
-  } catch (error) {
-    if (isNodeNotFoundError(error)) return false;
-    throw error;
-  }
-};
+export const fileExists$ = (path: string): Observable<boolean> =>
+  from(stat(path)).pipe(
+    map(() => true),
+    catchError((error) =>
+      isNodeNotFoundError(error) ? of(false) : throwError(() => error),
+    ),
+  );
 
 /**
  * Converts a platform-specific path to a forward-slash relative path.
