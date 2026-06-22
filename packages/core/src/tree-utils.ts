@@ -1,6 +1,7 @@
 import type { Oid } from "@slim-git/types";
 import { concatMap, EMPTY, expand, filter, map, of, type Observable, toArray } from "rxjs";
 import { bytesToHex } from "./bytes.js";
+import { parseCommit$ } from "./commit-parser.js";
 import type { ObjectStore } from "./object-store.js";
 
 /** Internal representation of a parsed tree entry used for HEAD comparisons. */
@@ -77,6 +78,13 @@ type TreeNode =
  * Uses `expand` to walk the tree declaratively: each directory node is replaced
  * by its children, while blob nodes are collected into the result.
  */
+/** Reads a commit object and returns the oid of its tree. */
+export const readCommitTree$ = (store: ObjectStore, oid: Oid): Observable<Oid> =>
+  store.read(oid).pipe(
+    concatMap((commit) => parseCommit$(commit)),
+    map((info) => info.tree),
+  );
+
 export const flattenTree$ = (
   store: ObjectStore,
   treeOid: Oid,
@@ -91,8 +99,8 @@ export const flattenTree$ = (
             map(([name, entry]) => {
               const path = node.prefix ? `${node.prefix}/${name}` : name;
               return entry.mode === 0o040000
-                ? ({ kind: "tree" as const, oid: entry.oid, prefix: path })
-                : ({ kind: "blob" as const, path, entry });
+                ? { kind: "tree" as const, oid: entry.oid, prefix: path }
+                : { kind: "blob" as const, path, entry };
             }),
           ),
     ),

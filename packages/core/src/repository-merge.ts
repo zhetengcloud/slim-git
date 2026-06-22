@@ -13,7 +13,7 @@ import {
 } from "rxjs";
 import { CommitBuilder } from "./commit-builder.js";
 import { findMergeBase$ } from "./merge-base.js";
-import type { Repository } from "./repository.js";
+import type { Repository } from "./repository/index.js";
 import { flattenTree$ } from "./tree-utils.js";
 import { mergeTrees$ } from "./tree-merge.js";
 

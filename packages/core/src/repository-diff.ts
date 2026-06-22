@@ -17,7 +17,7 @@ import type { Index } from "./index-model.js";
 import type { TreeEntryMap } from "./tree-utils.js";
 import { flattenTree$ } from "./tree-utils.js";
 import { unifiedDiff } from "./diff.js";
-import type { Repository } from "./repository.js";
+import type { Repository } from "./repository/index.js";
 
 /** Default file mode used for regular files staged into the index. */
 const DefaultFileMode = 0o100644;
