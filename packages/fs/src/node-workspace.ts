@@ -2,7 +2,7 @@ import type { WorkspaceBackend } from "@slim-git/core";
 import type { WorkspaceRemoveResult, WorkspaceWriteResult } from "@slim-git/types";
 import { opendir, readFile, rm } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { from, map, type Observable } from "rxjs";
+import { EMPTY, expand, filter, from, map, mergeMap, type Observable, of, toArray } from "rxjs";
 import { fileExists$, toUnixPath, writeFileEnsuringDir$ } from "./node-utils.js";
 
 /**
@@ -31,7 +31,10 @@ export class NodeWorkspaceBackend implements WorkspaceBackend {
   }
 
   listFiles(): Observable<string[]> {
-    return from(listFilesRecursive(this.root, this.root)).pipe(map((files) => files.sort()));
+    return listFilesRecursive$(this.root).pipe(
+      toArray(),
+      map((files) => files.sort()),
+    );
   }
 
   exists(path: string): Observable<boolean> {
@@ -44,23 +47,35 @@ export class NodeWorkspaceBackend implements WorkspaceBackend {
   }
 }
 
+/** A node in the recursive directory traversal. */
+type TreeNode =
+  | { readonly kind: "dir"; readonly path: string }
+  | { readonly kind: "file"; readonly path: string };
+
 /**
- * Recursively lists all files under `dir`, returning paths relative to `root`
+ * Recursively lists all files under `root`, returning paths relative to `root`
  * as forward-slash strings.
+ *
+ * Uses `expand` to walk the directory tree declaratively: directories are
+ * expanded into their entries, and subdirectories are fed back for further
+ * expansion until only file paths remain.
  */
-const listFilesRecursive = async (root: string, dir: string): Promise<string[]> => {
-  const files: string[] = [];
-  const entries = await opendir(dir);
-
-  for await (const entry of entries) {
-    const absolute = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      files.push(...(await listFilesRecursive(root, absolute)));
-    } else if (entry.isFile()) {
-      files.push(toUnixPath(relative(root, absolute)));
-    }
-  }
-
-  return files;
-};
+const listFilesRecursive$ = (root: string): Observable<string> =>
+  of<TreeNode>({ kind: "dir", path: root }).pipe(
+    expand((node) =>
+      node.kind === "file"
+        ? EMPTY
+        : from(opendir(node.path)).pipe(
+            mergeMap((dir) => from(dir)),
+            map((entry) => {
+              const absolute = join(node.path, entry.name);
+              return entry.isDirectory()
+                ? ({ kind: "dir" as const, path: absolute })
+                : ({ kind: "file" as const, path: toUnixPath(relative(root, absolute)) });
+            }),
+          ),
+    ),
+    filter((node): node is Extract<TreeNode, { kind: "file" }> => node.kind === "file"),
+    map((node) => node.path),
+  );
 
