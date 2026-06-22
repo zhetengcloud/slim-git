@@ -1,36 +1,11 @@
-import type { AddResult, IndexEntry, Oid, RemoveResult, RestoreResult } from "@slim-git/types";
+import type { AddResult, RemoveResult, RestoreResult } from "@slim-git/types";
 import { combineLatest, concatMap, forkJoin, map, of, type Observable } from "rxjs";
+import { createIndexEntry } from "./index-entry-utils.js";
+import { isIgnored, parseGitignore, type GitignorePattern } from "./gitignore.js";
+import { Index } from "./index-model.js";
 import type { IndexStore } from "./index-store.js";
 import type { ObjectStore } from "./object-store.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
-import { isIgnored, parseGitignore, type GitignorePattern } from "./gitignore.js";
-import { Index } from "./index-model.js";
-
-/** Creates an index entry from a workspace file. */
-const createIndexEntry = (path: string, oid: Oid, content: Uint8Array): IndexEntry => {
-  const now = new Date();
-  const timestampSeconds = Math.floor(now.getTime() / 1000);
-
-  return {
-    path,
-    oid,
-    mode: 0o100644,
-    stage: 0,
-    fileSize: content.length,
-    ctimeSeconds: timestampSeconds,
-    ctimeNanos: 0,
-    mtimeSeconds: timestampSeconds,
-    mtimeNanos: 0,
-    dev: 0,
-    ino: 0,
-    uid: 0,
-    gid: 0,
-    assumeValid: false,
-    extended: false,
-    skipWorktree: false,
-    intentToAdd: false,
-  };
-};
 
 /**
  * Staging operations: add, remove, and restore files.

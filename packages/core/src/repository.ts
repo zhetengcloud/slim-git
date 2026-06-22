@@ -10,11 +10,9 @@ import type {
   DestroyResult,
   Diff,
   FetchResult,
-  IndexEntry,
   LogOptions,
   MergeResult,
   Oid,
-  Person,
   PushResult,
   Remote,
   RemoveResult,
@@ -24,20 +22,20 @@ import type {
 } from "@slim-git/types";
 import { NotFoundError } from "@slim-git/types";
 import type { StorageBackend } from "./backend.js";
-import { CommitBuilder } from "./commit-builder.js";
 import type { Config } from "./config.js";
-import { parseCommit$ } from "./commit-parser.js";
+import { createIndexEntry } from "./index-entry-utils.js";
 import { DefaultHash, type HashAlgorithm } from "./hash.js";
 import { Index } from "./index-model.js";
 import type { IndexStore } from "./index-store.js";
 import { ObjectStore } from "./object-store.js";
 import type { RefStore } from "./ref-store.js";
-import { TreeBuilder } from "./tree-builder.js";
 import type { TreeEntryMap } from "./tree-utils.js";
 import { flattenTree$, readCommitTree$ } from "./tree-utils.js";
 import { RefService, type RefCreateOptions } from "./ref-service.js";
 import { StatusService } from "./status-service.js";
 import { StagingService } from "./staging-service.js";
+import { CommitService, type CommitOptions } from "./commit-service.js";
+import { HistoryService } from "./history-service.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
 import { diffHeadRef, diffIndexHead, diffWorktreeIndex } from "./repository-diff.js";
 import { fastForwardMerge, merge, type MergeOptions } from "./repository-merge.js";
@@ -49,19 +47,9 @@ import {
 } from "./repository-remotes.js";
 import { fetch, pull, push, type FetchOptions } from "./repository-fetch.js";
 import type { Transport } from "./transport.js";
-import {
-  combineLatest,
-  concatMap,
-  defaultIfEmpty,
-  distinct,
-  expand,
-  forkJoin,
-  from,
-  map,
-  of,
-  type Observable,
-  throwError,
-} from "rxjs";
+import { concatMap, defaultIfEmpty, forkJoin, map, of, type Observable, throwError } from "rxjs";
+
+export type { CommitOptions };
 
 /** Options used when initializing or opening a repository. */
 export interface RepositoryOptions {
@@ -71,43 +59,6 @@ export interface RepositoryOptions {
   readonly workspace?: WorkspaceBackend;
   readonly config?: Config;
 }
-
-/** Options used when creating or amending a commit. */
-export interface CommitOptions {
-  readonly message: string;
-  readonly author: Person;
-  readonly committer?: Person;
-}
-
-/**
- * Creates an index entry from a workspace file.
- * Timestamps are set to the current time; device/inode fields are zeroed because
- * the memory backend does not track real filesystem metadata.
- */
-const createIndexEntry = (path: string, oid: Oid, content: Uint8Array): IndexEntry => {
-  const now = new Date();
-  const timestampSeconds = Math.floor(now.getTime() / 1000);
-
-  return {
-    path,
-    oid,
-    mode: 0o100644,
-    stage: 0,
-    fileSize: content.length,
-    ctimeSeconds: timestampSeconds,
-    ctimeNanos: 0,
-    mtimeSeconds: timestampSeconds,
-    mtimeNanos: 0,
-    dev: 0,
-    ino: 0,
-    uid: 0,
-    gid: 0,
-    assumeValid: false,
-    extended: false,
-    skipWorktree: false,
-    intentToAdd: false,
-  };
-};
 
 /**
  * High-level repository API.
@@ -128,6 +79,8 @@ export class Repository {
   private readonly refService: RefService;
   private readonly statusService: StatusService;
   private readonly stagingService: StagingService;
+  private readonly commitService: CommitService;
+  private readonly historyService: HistoryService;
 
   private constructor(
     readonly backend: StorageBackend,
@@ -150,6 +103,8 @@ export class Repository {
       this.refService,
     );
     this.stagingService = new StagingService(this.objectStore, indexStore, workspace);
+    this.commitService = new CommitService(this.objectStore, indexStore, this.refService);
+    this.historyService = new HistoryService(this.objectStore, this.refService);
   }
 
   /** Creates a fresh repository instance backed by the given storage backend. */
@@ -234,73 +189,12 @@ export class Repository {
    * memory backend; it will be revised to match canonical Git once persistence lands.
    */
   commit(options: CommitOptions): Observable<Oid> {
-    return combineLatest([this.indexStore.read(), this.resolveRef("HEAD")]).pipe(
-      concatMap(([index, parent]) =>
-        this.buildTreeFromIndex$(index).pipe(
-          map((treeOid) => {
-            const builder = new CommitBuilder()
-              .tree(treeOid)
-              .author(options.author)
-              .committer(options.committer ?? options.author)
-              .message(options.message);
-            if (parent !== undefined) {
-              builder.parent(parent);
-            }
-            return builder;
-          }),
-        ),
-      ),
-      concatMap((builder) => builder.build(this.objectStore)),
-      concatMap((commitOid) => this.updateHeadRef$(commitOid)),
-    );
+    return this.commitService.commit(options);
   }
 
   /** Rewrites the current HEAD commit in place, keeping its tree and parents. */
   amend(options: CommitOptions): Observable<Oid> {
-    return this.amend$(options);
-  }
-
-  private amend$(options: CommitOptions): Observable<Oid> {
-    return this.resolveRef("HEAD").pipe(
-      concatMap((headTarget) => {
-        if (headTarget === undefined) {
-          return throwError(() => new Error("Cannot amend: HEAD does not exist"));
-        }
-        return this.objectStore.read(headTarget).pipe(
-          concatMap((headCommit) => parseCommit$(headCommit)),
-          concatMap((info) => {
-            const builder = new CommitBuilder()
-              .tree(info.tree)
-              .parentsList(info.parents)
-              .author(options.author)
-              .committer(options.committer ?? options.author)
-              .message(options.message);
-            return builder.build(this.objectStore);
-          }),
-          concatMap((commitOid) => this.updateHeadRef$(commitOid)),
-        );
-      }),
-    );
-  }
-
-  /**
-   * Moves HEAD to `commitOid`. If HEAD is a symbolic ref to a branch, the branch
-   * is updated and HEAD remains symbolic.
-   */
-  private updateHeadRef$(commitOid: Oid): Observable<Oid> {
-    return this.refs.read("HEAD").pipe(
-      concatMap((headValue) => {
-        const branchRef = headValue?.startsWith("ref: ")
-          ? headValue.slice("ref: ".length)
-          : undefined;
-        const targetRef$ = branchRef !== undefined ? of(branchRef) : of("HEAD");
-        return targetRef$.pipe(
-          concatMap((ref) => this.refs.write(ref, commitOid)),
-          concatMap(() => this.indexStore.write(Index.empty())),
-          map(() => commitOid),
-        );
-      }),
-    );
+    return this.commitService.amend(options);
   }
 
   /**
@@ -310,26 +204,7 @@ export class Repository {
    * composed with any RxJS operators (e.g. `take(10)`).
    */
   log(options: LogOptions = {}): Observable<CommitInfo> {
-    const startRef = options.ref ?? "HEAD";
-
-    return this.resolveCommitInfo$(startRef).pipe(
-      expand((commit) =>
-        from(commit.parents).pipe(concatMap((parent) => this.resolveCommitInfo$(parent))),
-      ),
-      distinct((commit) => commit.oid),
-    );
-  }
-
-  /** Resolves a ref name, branch name, or oid to a `CommitInfo`. */
-  private resolveCommitInfo$(ref: string): Observable<CommitInfo> {
-    return this.resolveRef(ref).pipe(
-      concatMap((oid) => {
-        if (oid === undefined) {
-          return throwError(() => new NotFoundError(`ref ${ref}`));
-        }
-        return this.objectStore.read(oid).pipe(concatMap((object) => parseCommit$(object)));
-      }),
-    );
+    return this.historyService.log(options);
   }
 
   /**
@@ -523,15 +398,6 @@ export class Repository {
       concatMap((index) => this.indexStore.write(index)),
       map(() => undefined),
     );
-  }
-
-  /** Builds a tree object from every entry in the index and returns its oid. */
-  private buildTreeFromIndex$(index: Index): Observable<Oid> {
-    const builder = index.toArray().reduce((tree, entry) => {
-      return tree.insert(entry.path, entry.oid, entry.mode);
-    }, new TreeBuilder());
-
-    return builder.build(this.objectStore);
   }
 
   /** Releases any resources held by the repository. */

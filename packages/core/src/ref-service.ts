@@ -1,13 +1,22 @@
-import type { Branch, CreateBranchResult, CreateTagResult, DeleteBranchResult, DeleteTagResult, Oid, Tag } from "@slim-git/types";
+import type {
+  Branch,
+  CreateBranchResult,
+  CreateTagResult,
+  DeleteBranchResult,
+  DeleteTagResult,
+  Oid,
+  RefWriteResult,
+  Tag,
+} from "@slim-git/types";
 import { ConflictError, NotFoundError, UnsupportedError } from "@slim-git/types";
+import { concatMap, map, of, type Observable, throwError } from "rxjs";
+import type { RefStore } from "./ref-store.js";
 
 /** Options used when creating a branch or tag. */
 export interface RefCreateOptions {
   /** Target ref name or oid. Defaults to HEAD. */
   readonly target?: string;
 }
-import { concatMap, map, of, type Observable, throwError } from "rxjs";
-import type { RefStore } from "./ref-store.js";
 
 /** True if the string looks like a SHA-1 (40 hex) or SHA-256 (64 hex) oid. */
 const looksLikeOid = (value: string): boolean =>
@@ -20,6 +29,16 @@ const looksLikeOid = (value: string): boolean =>
  */
 export class RefService {
   constructor(private readonly refs: RefStore) {}
+
+  /** Reads the raw value of HEAD, including symbolic refs like `ref: refs/heads/main`. */
+  readHead(): Observable<string | undefined> {
+    return this.refs.read("HEAD");
+  }
+
+  /** Writes a ref to the given target oid. */
+  writeRef(ref: string, target: Oid): Observable<RefWriteResult> {
+    return this.refs.write(ref, target);
+  }
 
   /**
    * Resolves a ref name, branch/tag short name, or oid to an oid.
