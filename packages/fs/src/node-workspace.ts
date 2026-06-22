@@ -1,8 +1,9 @@
 import type { WorkspaceBackend } from "@slim-git/core";
 import type { WorkspaceRemoveResult, WorkspaceWriteResult } from "@slim-git/types";
-import { opendir, mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { join, relative, sep } from "node:path";
-import { concatMap, from, map, type Observable } from "rxjs";
+import { opendir, readFile, rm } from "node:fs/promises";
+import { join, relative } from "node:path";
+import { from, map, type Observable } from "rxjs";
+import { fileExists, toUnixPath, writeFileEnsuringDir$ } from "./node-utils.js";
 
 /**
  * Node.js filesystem implementation of `WorkspaceBackend`.
@@ -20,9 +21,7 @@ export class NodeWorkspaceBackend implements WorkspaceBackend {
   }
 
   writeFile(path: string, content: Uint8Array): Observable<WorkspaceWriteResult> {
-    const absolute = this.toAbsolute(path);
-    return from(mkdir(join(absolute, ".."), { recursive: true })).pipe(
-      concatMap(() => from(writeFile(absolute, content))),
+    return writeFileEnsuringDir$(this.toAbsolute(path), content).pipe(
       map(() => ({ path })),
     );
   }
@@ -65,20 +64,3 @@ const listFilesRecursive = async (root: string, dir: string): Promise<string[]> 
   return files;
 };
 
-/** True if the given file exists and is readable. */
-const fileExists = async (path: string): Promise<boolean> => {
-  try {
-    await readFile(path);
-    return true;
-  } catch (error) {
-    if (isNotFoundError(error)) return false;
-    throw error;
-  }
-};
-
-/** Converts a platform path to a forward-slash relative path. */
-const toUnixPath = (path: string): string => path.split(sep).join("/");
-
-/** Checks whether an unknown value is a Node.js ENOENT error. */
-const isNotFoundError = (error: unknown): boolean =>
-  typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";

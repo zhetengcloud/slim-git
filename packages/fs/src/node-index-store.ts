@@ -1,10 +1,11 @@
 import type { IndexStore } from "@slim-git/core";
 import { Index } from "@slim-git/core";
 import type { IndexWriteResult } from "@slim-git/types";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { catchError, concatMap, from, map, of, type Observable, throwError } from "rxjs";
 import { decodeIndex, encodeIndex } from "./index-codec.js";
+import { isNodeNotFoundError, writeFileEnsuringDir$ } from "./node-utils.js";
 
 /**
  * Node.js filesystem implementation of `IndexStore` backed by `.git/index`.
@@ -26,8 +27,7 @@ export class NodeIndexStore implements IndexStore {
 
   write(index: Index): Observable<IndexWriteResult> {
     const bytes = encodeIndex(index);
-    return from(mkdir(dirname(this.indexPath()), { recursive: true })).pipe(
-      concatMap(() => from(writeFile(this.indexPath(), bytes))),
+    return writeFileEnsuringDir$(this.indexPath(), bytes).pipe(
       map(() => ({ entries: index.paths.length })),
     );
   }
@@ -37,6 +37,3 @@ export class NodeIndexStore implements IndexStore {
   }
 }
 
-/** Checks whether an unknown value is a Node.js ENOENT error. */
-const isNodeNotFoundError = (error: unknown): boolean =>
-  typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";

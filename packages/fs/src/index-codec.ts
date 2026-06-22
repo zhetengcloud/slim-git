@@ -1,6 +1,6 @@
 import type { IndexEntry, Oid } from "@slim-git/types";
 import { ParseError } from "@slim-git/types";
-import { Index } from "@slim-git/core";
+import { bytesToHex, Index } from "@slim-git/core";
 import { createHash } from "node:crypto";
 import {
   concatMap,
@@ -42,8 +42,8 @@ export const encodeIndex = (index: Index): Uint8Array => {
 
   buffer.set(HEADER_SIGNATURE, offset);
   offset += 4;
-  offset = writeUint32(buffer, offset, VERSION);
-  offset = writeUint32(buffer, offset, entries.length);
+  offset = writeUint32At(buffer, offset, VERSION);
+  offset = writeUint32At(buffer, offset, entries.length);
 
   for (const chunk of entryChunks) {
     buffer.set(chunk, offset);
@@ -97,12 +97,12 @@ export const readIndexHeader = (
       return throwError(() => new ParseError(`unsupported index signature: ${signature}`));
     }
 
-    const version = readUint32(buffer, 4);
+    const version = readUint32At(buffer, 4);
     if (version !== VERSION) {
       return throwError(() => new ParseError(`unsupported index version: ${version}`));
     }
 
-    return of({ entryCount: readUint32(buffer, 8) });
+    return of({ entryCount: readUint32At(buffer, 8) });
   });
 
 /** Encodes a single index entry. */
@@ -116,17 +116,17 @@ export const encodeIndexEntry = (entry: IndexEntry): Uint8Array => {
 
   offset = writeTimestamp(buffer, offset, entry.ctimeSeconds, entry.ctimeNanos);
   offset = writeTimestamp(buffer, offset, entry.mtimeSeconds, entry.mtimeNanos);
-  offset = writeUint32(buffer, offset, entry.dev);
-  offset = writeUint32(buffer, offset, entry.ino);
-  offset = writeUint32(buffer, offset, entry.mode);
-  offset = writeUint32(buffer, offset, entry.uid);
-  offset = writeUint32(buffer, offset, entry.gid);
-  offset = writeUint32(buffer, offset, entry.fileSize);
+  offset = writeUint32At(buffer, offset, entry.dev);
+  offset = writeUint32At(buffer, offset, entry.ino);
+  offset = writeUint32At(buffer, offset, entry.mode);
+  offset = writeUint32At(buffer, offset, entry.uid);
+  offset = writeUint32At(buffer, offset, entry.gid);
+  offset = writeUint32At(buffer, offset, entry.fileSize);
 
   buffer.set(oidToBytes(entry.oid), offset);
   offset += OID_BYTES;
 
-  offset = writeUint16(buffer, offset, buildIndexEntryFlags(entry));
+  offset = writeUint16At(buffer, offset, buildIndexEntryFlags(entry));
 
   buffer.set(pathBytes, offset);
   offset += pathBytes.length;
@@ -143,31 +143,31 @@ export const decodeIndexEntry = (
 ): { readonly entry: IndexEntry; readonly bytesRead: number } => {
   let offset = start;
 
-  const ctimeSeconds = readUint32(buffer, offset);
-  const ctimeNanos = readUint32(buffer, offset + 4);
+  const ctimeSeconds = readUint32At(buffer, offset);
+  const ctimeNanos = readUint32At(buffer, offset + 4);
   offset += 8;
 
-  const mtimeSeconds = readUint32(buffer, offset);
-  const mtimeNanos = readUint32(buffer, offset + 4);
+  const mtimeSeconds = readUint32At(buffer, offset);
+  const mtimeNanos = readUint32At(buffer, offset + 4);
   offset += 8;
 
-  const dev = readUint32(buffer, offset);
+  const dev = readUint32At(buffer, offset);
   offset += 4;
-  const ino = readUint32(buffer, offset);
+  const ino = readUint32At(buffer, offset);
   offset += 4;
-  const mode = readUint32(buffer, offset);
+  const mode = readUint32At(buffer, offset);
   offset += 4;
-  const uid = readUint32(buffer, offset);
+  const uid = readUint32At(buffer, offset);
   offset += 4;
-  const gid = readUint32(buffer, offset);
+  const gid = readUint32At(buffer, offset);
   offset += 4;
-  const fileSize = readUint32(buffer, offset);
+  const fileSize = readUint32At(buffer, offset);
   offset += 4;
 
   const oid = bytesToOid(buffer.slice(offset, offset + OID_BYTES));
   offset += OID_BYTES;
 
-  const flags = readUint16(buffer, offset);
+  const flags = readUint16At(buffer, offset);
   offset += 2;
 
   const stage = (flags >> 12) & 0x03;
@@ -221,10 +221,7 @@ export const oidToBytes = (oid: Oid): Uint8Array => {
 };
 
 /** Converts oid bytes to a lowercase hex string. */
-export const bytesToOid = (bytes: Uint8Array): Oid =>
-  Array.from(bytes)
-    .map((byte) => byte.toString(16).padStart(2, "0"))
-    .join("") as Oid;
+export const bytesToOid = (bytes: Uint8Array): Oid => bytesToHex(bytes) as Oid;
 
 /** Builds the 16-bit flags field from an index entry. */
 export const buildIndexEntryFlags = (entry: IndexEntry): number => {
@@ -235,27 +232,27 @@ export const buildIndexEntryFlags = (entry: IndexEntry): number => {
 };
 
 /** Writes a 32-bit big-endian integer. */
-export const writeUint32 = (buffer: Uint8Array, offset: number, value: number): number => {
+export const writeUint32At = (buffer: Uint8Array, offset: number, value: number): number => {
   const view = new DataView(buffer.buffer, buffer.byteOffset + offset, 4);
   view.setUint32(0, value, false);
   return offset + 4;
 };
 
 /** Reads a 32-bit big-endian integer. */
-export const readUint32 = (buffer: Uint8Array, offset: number): number => {
+export const readUint32At = (buffer: Uint8Array, offset: number): number => {
   const view = new DataView(buffer.buffer, buffer.byteOffset + offset, 4);
   return view.getUint32(0, false);
 };
 
 /** Writes a 16-bit big-endian integer. */
-export const writeUint16 = (buffer: Uint8Array, offset: number, value: number): number => {
+export const writeUint16At = (buffer: Uint8Array, offset: number, value: number): number => {
   const view = new DataView(buffer.buffer, buffer.byteOffset + offset, 2);
   view.setUint16(0, value, false);
   return offset + 2;
 };
 
 /** Reads a 16-bit big-endian integer. */
-export const readUint16 = (buffer: Uint8Array, offset: number): number => {
+export const readUint16At = (buffer: Uint8Array, offset: number): number => {
   const view = new DataView(buffer.buffer, buffer.byteOffset + offset, 2);
   return view.getUint16(0, false);
 };
@@ -267,7 +264,7 @@ export const writeTimestamp = (
   seconds: number,
   nanos: number,
 ): number => {
-  let next = writeUint32(buffer, offset, seconds);
-  next = writeUint32(buffer, next, nanos);
+  let next = writeUint32At(buffer, offset, seconds);
+  next = writeUint32At(buffer, next, nanos);
   return next;
 };

@@ -1,14 +1,7 @@
 import type { Config } from "@slim-git/core";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
-import {
-  catchError,
-  concatMap,
-  from,
-  map,
-  of,
-  type Observable,
-} from "rxjs";
+import { readFile } from "node:fs/promises";
+import { catchError, concatMap, from, map, of, type Observable } from "rxjs";
+import { isNodeNotFoundError, writeFileEnsuringDir$ } from "./node-utils.js";
 
 /**
  * A parsed config entry.
@@ -21,13 +14,6 @@ export interface ConfigEntry {
   readonly key: string;
   readonly value: string;
 }
-
-/** Checks whether an unknown value is a Node.js ENOENT error. */
-export const isNodeNotFoundError = (error: unknown): boolean =>
-  typeof error === "object" &&
-  error !== null &&
-  "code" in error &&
-  (error as { code: unknown }).code === "ENOENT";
 
 /**
  * Node.js filesystem implementation of `Config` backed by a Git config file.
@@ -110,10 +96,7 @@ export const replaceEntry = (
 export const writeConfigEntries = (
   path: string,
   entries: readonly ConfigEntry[],
-): Observable<void> =>
-  from(mkdir(dirname(path), { recursive: true })).pipe(
-    concatMap(() => from(writeFile(path, serializeConfig(entries)))),
-  );
+): Observable<void> => writeFileEnsuringDir$(path, serializeConfig(entries));
 
 /** Parses a Git config file into flat Config entries. */
 export const parseConfig = (text: string): ConfigEntry[] => {

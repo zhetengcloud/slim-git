@@ -1,5 +1,6 @@
 import type { Oid } from "@slim-git/types";
 import { concatMap, forkJoin, map, of, type Observable } from "rxjs";
+import { bytesToHex } from "./bytes.js";
 import type { ObjectStore } from "./object-store.js";
 
 /** Internal representation of a parsed tree entry used for HEAD comparisons. */
@@ -27,9 +28,7 @@ export const parseTreeEntries = (content: Uint8Array): Map<string, TreeEntryMap>
     const oidStart = nullIndex + 1;
     const oidEnd = oidStart + 20;
     const oidBytes = content.slice(oidStart, oidEnd);
-    const oid = Array.from(oidBytes)
-      .map((byte) => byte.toString(16).padStart(2, "0"))
-      .join("") as Oid;
+    const oid = bytesToHex(oidBytes) as Oid;
 
     entries.set(name, { oid, mode });
     position = oidEnd;
