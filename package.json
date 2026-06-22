@@ -10,7 +10,9 @@
     "lint": "bun x oxlint@latest",
     "typecheck": "bun tsc --build",
     "fmt": "bun x oxfmt",
-    "fmt:check": "bun x oxfmt --check"
+    "fmt:check": "bun x oxfmt --check",
+    "build": "bun run --filter '!slim-git' build && bun run --filter 'slim-git' build",
+    "publish:slim-git": "cd packages/slim-git && bun publish --access public"
   },
   "devDependencies": {
     "@types/bun": "latest",

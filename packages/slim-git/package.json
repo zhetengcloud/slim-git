@@ -1,17 +1,28 @@
 {
-  "name": "slim-git",
+  "name": "@zhetengcloud/slim-git",
   "version": "0.1.0",
   "type": "module",
-  "module": "src/index.ts",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
   "exports": {
-    ".": "./src/index.ts"
+    ".": {
+      "bun": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "bun run scripts/build.ts"
+  },
+  "publishConfig": {
+    "access": "public"
   },
   "dependencies": {
-    "@slim-git/core": "workspace:*",
-    "@slim-git/fs": "workspace:*",
-    "@slim-git/http": "workspace:*",
-    "@slim-git/memory": "workspace:*",
-    "@slim-git/types": "workspace:*",
     "rxjs": "^7.8.1"
   },
   "peerDependencies": {

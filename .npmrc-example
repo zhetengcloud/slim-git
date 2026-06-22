@@ -1,0 +1,38 @@
+# Registry-agnostic npm configuration for publishing slim-git.
+#
+# IMPORTANT: Do not commit secrets to this file. In CI the token is injected via
+# the environment; locally you can keep a separate .npmrc.local that is gitignored.
+#
+# Use the section that matches your target registry and comment the others out.
+
+# ---------------------------------------------------------------------------
+# 1) npm public registry (default)
+# ---------------------------------------------------------------------------
+//registry.npmjs.org/:_authToken=${NPM_TOKEN}
+
+# Publish:
+#   cd packages/slim-git && bun publish --access public
+# Or from the repo root:
+#   bun run publish:slim-git
+
+# ---------------------------------------------------------------------------
+# 2) GitHub Package Registry
+# ---------------------------------------------------------------------------
+# @slim-git:registry=https://npm.pkg.github.com
+# //npm.pkg.github.com/:_authToken=${NPM_TOKEN}
+
+# Publish:
+#   cd packages/slim-git && bun publish --access public --registry https://npm.pkg.github.com
+# Or from the repo root:
+#   NPM_REGISTRY_URL=https://npm.pkg.github.com bun run publish:slim-git
+
+# ---------------------------------------------------------------------------
+# 3) Private Gitea registry
+# ---------------------------------------------------------------------------
+# @slim-git:registry=https://gitea.example.com/api/packages/${GITEA_OWNER}/npm
+# //gitea.example.com/api/packages/${GITEA_OWNER}/npm/:_authToken=${NPM_TOKEN}
+
+# Publish:
+#   cd packages/slim-git && bun publish --access public --registry https://gitea.example.com/api/packages/${GITEA_OWNER}/npm
+# Or from the repo root:
+#   NPM_REGISTRY_URL=https://gitea.example.com/api/packages/${GITEA_OWNER}/npm bun run publish:slim-git
