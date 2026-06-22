@@ -1,5 +1,5 @@
 import type { Oid } from "@slim-git/types";
-import { concatMap, forkJoin, map, of, type Observable } from "rxjs";
+import { concatMap, EMPTY, expand, filter, map, of, type Observable, toArray } from "rxjs";
 import { bytesToHex } from "./bytes.js";
 import type { ObjectStore } from "./object-store.js";
 
@@ -65,31 +65,39 @@ export const findInTree$ = (
   );
 };
 
+/** A node in the recursive tree traversal. */
+type TreeNode =
+  | { readonly kind: "tree"; readonly oid: Oid; readonly prefix: string }
+  | { readonly kind: "blob"; readonly path: string; readonly entry: TreeEntryMap };
+
 /**
  * Recursively flattens a tree into a map of path → { oid, mode } for all blobs.
  * Directory paths are expanded; the returned map only contains files.
+ *
+ * Uses `expand` to walk the tree declaratively: each directory node is replaced
+ * by its children, while blob nodes are collected into the result.
  */
 export const flattenTree$ = (
   store: ObjectStore,
   treeOid: Oid,
   prefix = "",
-): Observable<Map<string, TreeEntryMap>> => {
-  return store.read(treeOid).pipe(
-    map((tree) => parseTreeEntries(tree.content)),
-    concatMap((entries) => {
-      const childTasks = Array.from(entries).map(([name, entry]) => {
-        const path = prefix ? `${prefix}/${name}` : name;
-        if (entry.mode === 0o040000) {
-          return flattenTree$(store, entry.oid, path).pipe(
-            map((childEntries) => Array.from(childEntries) as [string, TreeEntryMap][]),
-          );
-        }
-        return of([[path, entry]] as [string, TreeEntryMap][]);
-      });
-
-      return childTasks.length === 0
-        ? of(new Map<string, TreeEntryMap>())
-        : forkJoin(childTasks).pipe(map((groups) => new Map(groups.flat())));
-    }),
+): Observable<Map<string, TreeEntryMap>> =>
+  of<TreeNode>({ kind: "tree", oid: treeOid, prefix }).pipe(
+    expand((node) =>
+      node.kind === "blob"
+        ? EMPTY
+        : store.read(node.oid).pipe(
+            concatMap((tree) => Array.from(parseTreeEntries(tree.content))),
+            map(([name, entry]) => {
+              const path = node.prefix ? `${node.prefix}/${name}` : name;
+              return entry.mode === 0o040000
+                ? ({ kind: "tree" as const, oid: entry.oid, prefix: path })
+                : ({ kind: "blob" as const, path, entry });
+            }),
+          ),
+    ),
+    filter((node): node is Extract<TreeNode, { kind: "blob" }> => node.kind === "blob"),
+    map((node) => [node.path, node.entry] as [string, TreeEntryMap]),
+    toArray(),
+    map((entries) => new Map(entries)),
   );
-};
