@@ -15,7 +15,7 @@ import {
   throwError,
   toArray,
 } from "rxjs";
-import type { Repository } from "./repository.js";
+import type { Repository } from "./repository/index.js";
 import { parseTreeEntries } from "./tree-utils.js";
 import type { Transport } from "./transport.js";
 

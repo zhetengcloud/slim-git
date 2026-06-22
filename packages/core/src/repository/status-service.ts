@@ -1,12 +1,12 @@
 import type { Oid, Status } from "@slim-git/types";
 import { combineLatest, concatMap, forkJoin, map, of, type Observable } from "rxjs";
-import type { IndexStore } from "./index-store.js";
-import type { ObjectStore } from "./object-store.js";
+import type { IndexStore } from "@slim-git/core/index-store.js";
+import type { ObjectStore } from "@slim-git/core/object-store.js";
 import { RefService } from "./ref-service.js";
-import { findInTree$, readCommitTree$ } from "./tree-utils.js";
-import type { WorkspaceBackend } from "./workspace-backend.js";
-import { isIgnored, parseGitignore, type GitignorePattern } from "./gitignore.js";
-import { Index } from "./index-model.js";
+import { findInTree$, readCommitTree$ } from "@slim-git/core/tree-utils.js";
+import type { WorkspaceBackend } from "@slim-git/core/workspace-backend.js";
+import { isIgnored, parseGitignore, type GitignorePattern } from "@slim-git/core/gitignore.js";
+import { Index } from "@slim-git/core/index-model.js";
 
 /**
  * Computes the repository status by comparing the workspace, index, and HEAD.

@@ -28,10 +28,7 @@ export const bytesToHex = (bytes: Uint8Array): string =>
  *
  * Format: `<type> <size>\0<content>`.
  */
-export const buildObjectBytes = (
-  type: ObjectType,
-  content: Uint8Array,
-): Uint8Array => {
+export const buildObjectBytes = (type: ObjectType, content: Uint8Array): Uint8Array => {
   const header = new TextEncoder().encode(`${type} ${content.length}\0`);
   return concatBytes(header, content);
 };
@@ -73,12 +70,7 @@ export const readUint32 = (buffer: Uint8Array, offset: number): number =>
 
 /** Encodes a number as a big-endian unsigned 32-bit byte array. */
 export const writeUint32 = (value: number): Uint8Array =>
-  new Uint8Array([
-    (value >> 24) & 0xff,
-    (value >> 16) & 0xff,
-    (value >> 8) & 0xff,
-    value & 0xff,
-  ]);
+  new Uint8Array([(value >> 24) & 0xff, (value >> 16) & 0xff, (value >> 8) & 0xff, value & 0xff]);
 
 /** Reads a big-endian unsigned 16-bit integer from a buffer at `offset`. */
 export const readUint16 = (buffer: Uint8Array, offset: number): number =>

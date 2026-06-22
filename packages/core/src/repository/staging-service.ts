@@ -1,11 +1,11 @@
 import type { AddResult, RemoveResult, RestoreResult } from "@slim-git/types";
 import { combineLatest, concatMap, forkJoin, map, of, type Observable } from "rxjs";
-import { createIndexEntry } from "./index-entry-utils.js";
-import { isIgnored, parseGitignore, type GitignorePattern } from "./gitignore.js";
-import { Index } from "./index-model.js";
-import type { IndexStore } from "./index-store.js";
-import type { ObjectStore } from "./object-store.js";
-import type { WorkspaceBackend } from "./workspace-backend.js";
+import { createIndexEntry } from "@slim-git/core/index-entry-utils.js";
+import { isIgnored, parseGitignore, type GitignorePattern } from "@slim-git/core/gitignore.js";
+import { Index } from "@slim-git/core/index-model.js";
+import type { IndexStore } from "@slim-git/core/index-store.js";
+import type { ObjectStore } from "@slim-git/core/object-store.js";
+import type { WorkspaceBackend } from "@slim-git/core/workspace-backend.js";
 
 /**
  * Staging operations: add, remove, and restore files.

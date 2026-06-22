@@ -10,7 +10,7 @@ import type {
 } from "@slim-git/types";
 import { ConflictError, NotFoundError, UnsupportedError } from "@slim-git/types";
 import { concatMap, map, of, type Observable, throwError } from "rxjs";
-import type { RefStore } from "./ref-store.js";
+import type { RefStore } from "@slim-git/core/ref-store.js";
 
 /** Options used when creating a branch or tag. */
 export interface RefCreateOptions {

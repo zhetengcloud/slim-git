@@ -1,12 +1,12 @@
 import type { Oid, Person } from "@slim-git/types";
 import { combineLatest, concatMap, map, of, type Observable, throwError } from "rxjs";
-import { CommitBuilder } from "./commit-builder.js";
-import { parseCommit$ } from "./commit-parser.js";
-import type { IndexStore } from "./index-store.js";
-import { Index } from "./index-model.js";
-import type { ObjectStore } from "./object-store.js";
+import { CommitBuilder } from "@slim-git/core/commit-builder.js";
+import { parseCommit$ } from "@slim-git/core/commit-parser.js";
+import type { IndexStore } from "@slim-git/core/index-store.js";
+import { Index } from "@slim-git/core/index-model.js";
+import type { ObjectStore } from "@slim-git/core/object-store.js";
 import { RefService } from "./ref-service.js";
-import { TreeBuilder } from "./tree-builder.js";
+import { TreeBuilder } from "@slim-git/core/tree-builder.js";
 
 /** Options used when creating or amending a commit. */
 export interface CommitOptions {

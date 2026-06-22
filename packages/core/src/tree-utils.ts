@@ -99,8 +99,8 @@ export const flattenTree$ = (
             map(([name, entry]) => {
               const path = node.prefix ? `${node.prefix}/${name}` : name;
               return entry.mode === 0o040000
-                ? ({ kind: "tree" as const, oid: entry.oid, prefix: path })
-                : ({ kind: "blob" as const, path, entry });
+                ? { kind: "tree" as const, oid: entry.oid, prefix: path }
+                : { kind: "blob" as const, path, entry };
             }),
           ),
     ),

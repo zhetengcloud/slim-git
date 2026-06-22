@@ -9,7 +9,7 @@ import {
   toArray,
   type Observable,
 } from "rxjs";
-import type { Config } from "./config.js";
+import type { Config } from "@slim-git/core/config.js";
 
 /** Result of removing a remote. */
 export interface RemoveRemoteResult {

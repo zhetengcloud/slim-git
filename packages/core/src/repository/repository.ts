@@ -20,30 +20,30 @@ import type {
   Status,
   Tag,
 } from "@slim-git/types";
-import type { StorageBackend } from "./backend.js";
+import type { StorageBackend } from "@slim-git/core/backend.js";
 import { CheckoutService } from "./checkout-service.js";
-import type { Config } from "./config.js";
-import { DefaultHash, type HashAlgorithm } from "./hash.js";
-import { Index } from "./index-model.js";
-import type { IndexStore } from "./index-store.js";
-import { ObjectStore } from "./object-store.js";
-import type { RefStore } from "./ref-store.js";
-import type { TreeEntryMap } from "./tree-utils.js";
-import { readCommitTree$ } from "./tree-utils.js";
+import type { Config } from "@slim-git/core/config.js";
+import { DefaultHash, type HashAlgorithm } from "@slim-git/core/hash.js";
+import { Index } from "@slim-git/core/index-model.js";
+import type { IndexStore } from "@slim-git/core/index-store.js";
+import { ObjectStore } from "@slim-git/core/object-store.js";
+import type { RefStore } from "@slim-git/core/ref-store.js";
+import type { TreeEntryMap } from "@slim-git/core/tree-utils.js";
+import { readCommitTree$ } from "@slim-git/core/tree-utils.js";
 import { RefService, type RefCreateOptions } from "./ref-service.js";
 import { StatusService } from "./status-service.js";
 import { StagingService } from "./staging-service.js";
 import { CommitService, type CommitOptions } from "./commit-service.js";
 import { HistoryService } from "./history-service.js";
-import type { WorkspaceBackend } from "./workspace-backend.js";
-import { diffHeadRef, diffIndexHead, diffWorktreeIndex } from "./repository-diff.js";
-import { fastForwardMerge, merge, type MergeOptions } from "./repository-merge.js";
+import type { WorkspaceBackend } from "@slim-git/core/workspace-backend.js";
+import { diffHeadRef, diffIndexHead, diffWorktreeIndex } from "@slim-git/core/repository-diff.js";
+import { fastForwardMerge, merge, type MergeOptions } from "@slim-git/core/repository-merge.js";
 import { RemoteService, type RemoveRemoteResult } from "./remote-service.js";
-import { fetch, pull, push, type FetchOptions } from "./repository-fetch.js";
-import type { Transport } from "./transport.js";
+import { fetch, pull, push, type FetchOptions } from "@slim-git/core/repository-fetch.js";
+import type { Transport } from "@slim-git/core/transport.js";
 import { of, type Observable } from "rxjs";
 
-export type { CommitOptions };
+export type { CommitOptions, RefCreateOptions, RemoveRemoteResult };
 
 /** Options used when initializing or opening a repository. */
 export interface RepositoryOptions {

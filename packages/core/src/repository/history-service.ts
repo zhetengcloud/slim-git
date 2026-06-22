@@ -1,8 +1,8 @@
 import type { CommitInfo, LogOptions } from "@slim-git/types";
 import { NotFoundError } from "@slim-git/types";
 import { concatMap, distinct, expand, from, type Observable, throwError } from "rxjs";
-import { parseCommit$ } from "./commit-parser.js";
-import type { ObjectStore } from "./object-store.js";
+import { parseCommit$ } from "@slim-git/core/commit-parser.js";
+import type { ObjectStore } from "@slim-git/core/object-store.js";
 import { RefService } from "./ref-service.js";
 
 /**

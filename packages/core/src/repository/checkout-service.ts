@@ -1,14 +1,14 @@
 import type { CheckoutResult, Oid } from "@slim-git/types";
 import { NotFoundError } from "@slim-git/types";
 import { concatMap, defaultIfEmpty, forkJoin, map, of, type Observable, throwError } from "rxjs";
-import { createIndexEntry } from "./index-entry-utils.js";
-import { Index } from "./index-model.js";
-import type { IndexStore } from "./index-store.js";
-import type { ObjectStore } from "./object-store.js";
-import type { RefStore } from "./ref-store.js";
-import type { TreeEntryMap } from "./tree-utils.js";
-import { flattenTree$, readCommitTree$ } from "./tree-utils.js";
-import type { WorkspaceBackend } from "./workspace-backend.js";
+import { createIndexEntry } from "@slim-git/core/index-entry-utils.js";
+import { Index } from "@slim-git/core/index-model.js";
+import type { IndexStore } from "@slim-git/core/index-store.js";
+import type { ObjectStore } from "@slim-git/core/object-store.js";
+import type { RefStore } from "@slim-git/core/ref-store.js";
+import type { TreeEntryMap } from "@slim-git/core/tree-utils.js";
+import { flattenTree$, readCommitTree$ } from "@slim-git/core/tree-utils.js";
+import type { WorkspaceBackend } from "@slim-git/core/workspace-backend.js";
 
 /**
  * Working-tree checkout: switching branches, applying trees, and rebuilding the index.
