@@ -10,7 +10,7 @@ import {
 } from "@slim-git/core";
 import { createHash } from "node:crypto";
 import { deflateSync, Inflate } from "node:zlib";
-import { EMPTY, expand, last, map, Observable, of } from "rxjs";
+import { defer, EMPTY, expand, last, map, Observable, of } from "rxjs";
 
 /** Packfile object type constants. */
 const PackObjectType = {
@@ -132,77 +132,114 @@ const inflateObject$ = (
  *
  * See `gitformat-pack.txt` for the delta format.
  */
-export const applyDelta = (delta: Uint8Array, base: Uint8Array): Uint8Array => {
-  let position = 0;
+const readVarint = (
+  buffer: Uint8Array,
+  offset: number,
+): { readonly value: number; readonly nextPosition: number } => {
+  let byte = buffer[offset]!;
+  let value = byte & 0x7f;
+  let position = offset + 1;
 
-  const readVarint = (): number => {
-    let byte = delta[position]!;
-    let value = byte & 0x7f;
+  while ((byte & 0x80) !== 0) {
+    byte = buffer[position]!;
+    value = ((value + 1) << 7) | (byte & 0x7f);
     position++;
-
-    while ((byte & 0x80) !== 0) {
-      byte = delta[position]!;
-      value = ((value + 1) << 7) | (byte & 0x7f);
-      position++;
-    }
-
-    return value;
-  };
-
-  const baseLength = readVarint();
-  if (baseLength !== base.length) {
-    throw new Error(`Delta base length mismatch: expected ${base.length}, got ${baseLength}`);
   }
 
-  const resultLength = readVarint();
+  return { value, nextPosition: position };
+};
+
+/**
+ * Decodes an insert instruction: copy `size` literal bytes from the delta.
+ *
+ * A size of zero encodes the maximum insert size (64 KiB).
+ */
+const decodeInsertInstruction = (
+  delta: Uint8Array,
+  position: number,
+  instruction: number,
+): { readonly bytes: Uint8Array; readonly nextPosition: number } => {
+  let size = instruction & 0x7f;
+  if (size === 0) {
+    size = 0x10000;
+  }
+  return { bytes: delta.slice(position, position + size), nextPosition: position + size };
+};
+
+/**
+ * Decodes a copy instruction: copy `size` bytes from `base` at `offset`.
+ *
+ * Present bytes are selected by bit flags; a zero size encodes 64 KiB.
+ */
+const decodeCopyInstruction = (
+  delta: Uint8Array,
+  base: Uint8Array,
+  position: number,
+  instruction: number,
+): { readonly bytes: Uint8Array; readonly nextPosition: number } => {
+  let offset = 0;
+  if ((instruction & 0x01) !== 0) offset |= delta[position]!;
+  if ((instruction & 0x02) !== 0) offset |= delta[position + 1]! << 8;
+  if ((instruction & 0x04) !== 0) offset |= delta[position + 2]! << 16;
+  if ((instruction & 0x08) !== 0) offset |= delta[position + 3]! << 24;
+
+  const offsetBytes =
+    ((instruction & 0x01) >> 0) +
+    ((instruction & 0x02) >> 1) +
+    ((instruction & 0x04) >> 2) +
+    ((instruction & 0x08) >> 3);
+
+  let size = 0;
+  if ((instruction & 0x10) !== 0) size |= delta[position + offsetBytes]!;
+  if ((instruction & 0x20) !== 0) size |= delta[position + offsetBytes + 1]! << 8;
+  if ((instruction & 0x40) !== 0) size |= delta[position + offsetBytes + 2]! << 16;
+
+  const sizeBytes =
+    ((instruction & 0x10) >> 4) + ((instruction & 0x20) >> 5) + ((instruction & 0x40) >> 6);
+
+  if (size === 0) {
+    size = 0x10000;
+  }
+
+  return {
+    bytes: base.slice(offset, offset + size),
+    nextPosition: position + offsetBytes + sizeBytes,
+  };
+};
+
+/**
+ * Applies a Git delta instruction stream to a base object.
+ *
+ * The base and result must both be the canonical object bytes
+ * (`<type> <size>\0<content>`). After applying the delta, the caller parses
+ * the resulting bytes as a normal object.
+ *
+ * See `gitformat-pack.txt` for the delta format.
+ */
+export const applyDelta = (delta: Uint8Array, base: Uint8Array): Uint8Array => {
+  let header = readVarint(delta, 0);
+  if (header.value !== base.length) {
+    throw new Error(`Delta base length mismatch: expected ${base.length}, got ${header.value}`);
+  }
+
+  header = readVarint(delta, header.nextPosition);
+  const resultLength = header.value;
   const result = new Uint8Array(resultLength);
   let written = 0;
+  let position = header.nextPosition;
 
   while (position < delta.length) {
     const instruction = delta[position]!;
     position++;
 
-    if ((instruction & 0x80) === 0) {
-      // Insert instruction: copy the next `size` bytes literally from the delta.
-      let size = instruction & 0x7f;
-      if (size === 0) {
-        size = 0x10000;
-      }
-      result.set(delta.slice(position, position + size), written);
-      position += size;
-      written += size;
-    } else {
-      // Copy instruction: copy `size` bytes from `base` at `offset`.
-      let offset = 0;
-      let size = 0;
+    const { bytes, nextPosition } =
+      (instruction & 0x80) === 0
+        ? decodeInsertInstruction(delta, position, instruction)
+        : decodeCopyInstruction(delta, base, position, instruction);
 
-      if ((instruction & 0x01) !== 0) offset |= delta[position]!;
-      if ((instruction & 0x02) !== 0) offset |= delta[position + 1]! << 8;
-      if ((instruction & 0x04) !== 0) offset |= delta[position + 2]! << 16;
-      if ((instruction & 0x08) !== 0) offset |= delta[position + 3]! << 24;
-
-      const offsetBytes =
-        ((instruction & 0x01) >> 0) +
-        ((instruction & 0x02) >> 1) +
-        ((instruction & 0x04) >> 2) +
-        ((instruction & 0x08) >> 3);
-
-      if ((instruction & 0x10) !== 0) size |= delta[position + offsetBytes]!;
-      if ((instruction & 0x20) !== 0) size |= delta[position + offsetBytes + 1]! << 8;
-      if ((instruction & 0x40) !== 0) size |= delta[position + offsetBytes + 2]! << 16;
-
-      const sizeBytes =
-        ((instruction & 0x10) >> 4) + ((instruction & 0x20) >> 5) + ((instruction & 0x40) >> 6);
-
-      position += offsetBytes + sizeBytes;
-
-      if (size === 0) {
-        size = 0x10000;
-      }
-
-      result.set(base.slice(offset, offset + size), written);
-      written += size;
-    }
+    result.set(bytes, written);
+    position = nextPosition;
+    written += bytes.length;
   }
 
   if (written !== resultLength) {
@@ -422,37 +459,38 @@ const parseObjectEntry$ = (
 export const parsePackfile$ = (
   buffer: Uint8Array,
   hashAlgorithm: HashAlgorithm,
-): Observable<readonly GitObject[]> => {
-  const header = readPackHeader(buffer);
+): Observable<readonly GitObject[]> =>
+  defer(() => {
+    const header = readPackHeader(buffer);
 
-  const initialState: ParseState = {
-    position: header.dataStart,
-    rawByOffset: new Map(),
-    objectsByOid: new Map(),
-    objects: [],
-  };
+    const initialState: ParseState = {
+      position: header.dataStart,
+      rawByOffset: new Map(),
+      objectsByOid: new Map(),
+      objects: [],
+    };
 
-  return of(initialState).pipe(
-    expand((state) =>
-      state.objects.length >= header.objectCount
-        ? EMPTY
-        : parseObjectEntry$(
-            buffer,
-            state.position,
-            state.position,
-            hashAlgorithm,
-            state.rawByOffset,
-            state.objectsByOid,
-          ).pipe(
-            map((entry) => ({
-              position: entry.nextPosition,
-              rawByOffset: new Map(state.rawByOffset).set(entry.offset, entry.raw),
-              objectsByOid: new Map(state.objectsByOid).set(entry.object.oid, entry.object),
-              objects: [...state.objects, entry.object],
-            })),
-          ),
-    ),
-    last(),
-    map((state) => state.objects),
-  );
-};
+    return of(initialState).pipe(
+      expand((state) =>
+        state.objects.length >= header.objectCount
+          ? EMPTY
+          : parseObjectEntry$(
+              buffer,
+              state.position,
+              state.position,
+              hashAlgorithm,
+              state.rawByOffset,
+              state.objectsByOid,
+            ).pipe(
+              map((entry) => ({
+                position: entry.nextPosition,
+                rawByOffset: new Map(state.rawByOffset).set(entry.offset, entry.raw),
+                objectsByOid: new Map(state.objectsByOid).set(entry.object.oid, entry.object),
+                objects: [...state.objects, entry.object],
+              })),
+            ),
+      ),
+      last(),
+      map((state) => state.objects),
+    );
+  });
