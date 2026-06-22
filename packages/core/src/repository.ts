@@ -20,17 +20,16 @@ import type {
   Status,
   Tag,
 } from "@slim-git/types";
-import { NotFoundError } from "@slim-git/types";
 import type { StorageBackend } from "./backend.js";
+import { CheckoutService } from "./checkout-service.js";
 import type { Config } from "./config.js";
-import { createIndexEntry } from "./index-entry-utils.js";
 import { DefaultHash, type HashAlgorithm } from "./hash.js";
 import { Index } from "./index-model.js";
 import type { IndexStore } from "./index-store.js";
 import { ObjectStore } from "./object-store.js";
 import type { RefStore } from "./ref-store.js";
 import type { TreeEntryMap } from "./tree-utils.js";
-import { flattenTree$, readCommitTree$ } from "./tree-utils.js";
+import { readCommitTree$ } from "./tree-utils.js";
 import { RefService, type RefCreateOptions } from "./ref-service.js";
 import { StatusService } from "./status-service.js";
 import { StagingService } from "./staging-service.js";
@@ -47,7 +46,7 @@ import {
 } from "./repository-remotes.js";
 import { fetch, pull, push, type FetchOptions } from "./repository-fetch.js";
 import type { Transport } from "./transport.js";
-import { concatMap, defaultIfEmpty, forkJoin, map, of, type Observable, throwError } from "rxjs";
+import { of, type Observable } from "rxjs";
 
 export type { CommitOptions };
 
@@ -81,6 +80,7 @@ export class Repository {
   private readonly stagingService: StagingService;
   private readonly commitService: CommitService;
   private readonly historyService: HistoryService;
+  private readonly checkoutService: CheckoutService;
 
   private constructor(
     readonly backend: StorageBackend,
@@ -105,6 +105,7 @@ export class Repository {
     this.stagingService = new StagingService(this.objectStore, indexStore, workspace);
     this.commitService = new CommitService(this.objectStore, indexStore, this.refService);
     this.historyService = new HistoryService(this.objectStore, this.refService);
+    this.checkoutService = new CheckoutService(this.objectStore, refs, indexStore, workspace);
   }
 
   /** Creates a fresh repository instance backed by the given storage backend. */
@@ -246,88 +247,19 @@ export class Repository {
    * - If `target` is a commit oid, HEAD becomes detached at that commit.
    */
   checkout(target: string): Observable<CheckoutResult> {
-    return this.checkout$(target);
-  }
-
-  private checkout$(target: string): Observable<CheckoutResult> {
-    const branchRef = `refs/heads/${target}`;
-
-    return this.refs.read(branchRef).pipe(
-      concatMap((branchTarget) => {
-        if (branchTarget !== undefined) {
-          return of({ commitOid: branchTarget as Oid, headValue: `ref: ${branchRef}` });
-        }
-        const oid = target as Oid;
-        return this.objectStore.read(oid).pipe(
-          concatMap((object) => {
-            if (object.type !== "commit") {
-              return throwError(() => new NotFoundError(`commit ${target}`));
-            }
-            return of({ commitOid: oid, headValue: target });
-          }),
-        );
-      }),
-      concatMap(({ commitOid, headValue }) =>
-        this.readCommitTree$(commitOid).pipe(
-          concatMap((treeOid) => flattenTree$(this.objectStore, treeOid)),
-          concatMap((treeEntries) => this.applyTreeToWorkspace$(treeEntries)),
-          concatMap((treeEntries) => this.buildIndexFromTree$(treeEntries)),
-          concatMap((index) => this.refs.write("HEAD", headValue).pipe(map(() => index))),
-          concatMap((index) =>
-            this.indexStore.write(index).pipe(
-              map(() => ({
-                commitOid,
-                branch: headValue.startsWith("ref: ")
-                  ? headValue.slice("ref: refs/heads/".length)
-                  : undefined,
-              })),
-            ),
-          ),
-        ),
-      ),
-    );
+    return this.checkoutService.checkout(target);
   }
 
   /** Removes workspace files not present in the target tree and writes the tree files. */
   applyTreeToWorkspace$(
     treeEntries: Map<string, TreeEntryMap>,
   ): Observable<Map<string, TreeEntryMap>> {
-    return this.workspace.listFiles().pipe(
-      concatMap((workspaceFiles) => {
-        const toRemove = workspaceFiles.filter((path) => !treeEntries.has(path));
-        return forkJoin(toRemove.map((path) => this.workspace.removeFile(path))).pipe(
-          defaultIfEmpty([]),
-          map(() => treeEntries),
-        );
-      }),
-      concatMap((entries) =>
-        forkJoin(
-          Array.from(entries).map(([path, entry]) =>
-            this.objectStore
-              .read(entry.oid)
-              .pipe(concatMap((object) => this.workspace.writeFile(path, object.content))),
-          ),
-        ).pipe(
-          defaultIfEmpty([]),
-          map(() => entries),
-        ),
-      ),
-    );
+    return this.checkoutService.applyTreeToWorkspace$(treeEntries);
   }
 
   /** Builds an index from a flattened tree. */
   buildIndexFromTree$(treeEntries: Map<string, TreeEntryMap>): Observable<Index> {
-    return Array.from(treeEntries).reduce<Observable<Index>>(
-      (index$, [path, entry]) =>
-        index$.pipe(
-          concatMap((index) =>
-            this.objectStore
-              .read(entry.oid)
-              .pipe(map((object) => index.add(createIndexEntry(path, entry.oid, object.content)))),
-          ),
-        ),
-      of(Index.empty()),
-    );
+    return this.checkoutService.buildIndexFromTree$(treeEntries);
   }
 
   /** Creates a lightweight tag pointing at `target` (default HEAD). */
@@ -391,13 +323,7 @@ export class Repository {
 
   /** Updates the workspace and index to match a commit's tree without moving HEAD. */
   applyCommit$(commitOid: Oid): Observable<void> {
-    return this.readCommitTree$(commitOid).pipe(
-      concatMap((treeOid) => flattenTree$(this.objectStore, treeOid)),
-      concatMap((treeEntries) => this.applyTreeToWorkspace$(treeEntries)),
-      concatMap((treeEntries) => this.buildIndexFromTree$(treeEntries)),
-      concatMap((index) => this.indexStore.write(index)),
-      map(() => undefined),
-    );
+    return this.checkoutService.applyCommit$(commitOid);
   }
 
   /** Releases any resources held by the repository. */
