@@ -34,7 +34,7 @@ import { ObjectStore } from "./object-store.js";
 import type { RefStore } from "./ref-store.js";
 import { TreeBuilder } from "./tree-builder.js";
 import type { TreeEntryMap } from "./tree-utils.js";
-import { findInTree$, flattenTree$ } from "./tree-utils.js";
+import { findInTree$, flattenTree$, readCommitTree$ } from "./tree-utils.js";
 import type { WorkspaceBackend } from "./workspace-backend.js";
 import { isIgnored, parseGitignore, type GitignorePattern } from "./gitignore.js";
 import { diffHeadRef, diffIndexHead, diffWorktreeIndex } from "./repository-diff.js";
@@ -257,10 +257,7 @@ export class Repository {
 
   /** Reads a commit object and returns the oid of its tree. */
   readCommitTree$(oid: Oid): Observable<Oid> {
-    return this.objectStore.read(oid).pipe(
-      concatMap((commit) => parseCommit$(commit)),
-      map((info) => info.tree),
-    );
+    return readCommitTree$(this.objectStore, oid);
   }
 
   /** Computes modified/deleted changes for all tracked paths. */
