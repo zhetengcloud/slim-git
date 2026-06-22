@@ -205,6 +205,135 @@ export const myersDiff = (oldLines: readonly string[], newLines: readonly string
   return reconstructEdits(trace, oldLines, newLines, maxDistance, finalDistance);
 };
 
+/** A contiguous slice of the edit script that forms one hunk. */
+interface ChangeRange {
+  start: number;
+  end: number;
+}
+
+/**
+ * Finds all change ranges in the edit script, extending each change by the
+ * requested number of context lines and merging overlapping/adjacent ranges.
+ */
+const computeChangeRanges = (
+  edits: readonly Edit[],
+  contextLines: number,
+): ChangeRange[] => {
+  const ranges: ChangeRange[] = [];
+
+  for (let index = 0; index < edits.length; index++) {
+    const edit = edits[index]!;
+    if (edit.type === "equal") {
+      continue;
+    }
+
+    const start = Math.max(0, index - contextLines);
+    const end = Math.min(edits.length - 1, index + contextLines);
+    const last = ranges[ranges.length - 1];
+
+    if (last && start <= last.end + 1) {
+      last.end = end;
+    } else {
+      ranges.push({ start, end });
+    }
+  }
+
+  return ranges;
+};
+
+/** Line counters before a hunk start, used for hunk header line numbers. */
+interface LineOffsets {
+  readonly oldLine: number;
+  readonly newLine: number;
+}
+
+/**
+ * Counts how many old and new lines appear before `start` in the edit script.
+ * Equal edits count for both sides; inserts/deletes only for their side.
+ */
+const countLinesBefore = (edits: readonly Edit[], start: number): LineOffsets => {
+  let oldLine = 0;
+  let newLine = 0;
+
+  for (let index = 0; index < start; index++) {
+    const edit = edits[index]!;
+    if (edit.type === "equal" || edit.type === "delete") {
+      oldLine++;
+    }
+    if (edit.type === "equal" || edit.type === "insert") {
+      newLine++;
+    }
+  }
+
+  return { oldLine, newLine };
+};
+
+/** Running state used while turning a change range into hunk lines. */
+interface HunkAccumulator {
+  lines: DiffLine[];
+  oldLines: number;
+  newLines: number;
+}
+
+/**
+ * Appends a single edit to the hunk accumulator, mapping the edit type to the
+ * corresponding diff line and updating the per-side line counts.
+ */
+const appendEditToHunk = (
+  acc: HunkAccumulator,
+  edit: Edit,
+  oldLines: readonly string[],
+  newLines: readonly string[],
+): void => {
+  switch (edit.type) {
+    case "equal": {
+      const text = oldLines[edit.oldIndex]!;
+      acc.lines.push({ type: "context", text });
+      acc.oldLines++;
+      acc.newLines++;
+      break;
+    }
+    case "insert": {
+      const text = newLines[edit.newIndex]!;
+      acc.lines.push({ type: "added", text });
+      acc.newLines++;
+      break;
+    }
+    case "delete": {
+      const text = oldLines[edit.oldIndex]!;
+      acc.lines.push({ type: "removed", text });
+      acc.oldLines++;
+      break;
+    }
+  }
+};
+
+/**
+ * Builds one unified-diff hunk from a change range, including header line
+ * numbers and counts.
+ */
+const buildHunk = (
+  edits: readonly Edit[],
+  oldLines: readonly string[],
+  newLines: readonly string[],
+  range: ChangeRange,
+): Hunk => {
+  const { oldLine, newLine } = countLinesBefore(edits, range.start);
+  const acc: HunkAccumulator = { lines: [], oldLines: 0, newLines: 0 };
+
+  for (let index = range.start; index <= range.end; index++) {
+    appendEditToHunk(acc, edits[index]!, oldLines, newLines);
+  }
+
+  return {
+    oldStart: oldLine + 1,
+    oldLines: acc.oldLines,
+    newStart: newLine + 1,
+    newLines: acc.newLines,
+    lines: acc.lines,
+  };
+};
+
 /**
  * Groups a Myers edit script into unified-diff hunks with the requested number
  * of context lines.
@@ -219,81 +348,8 @@ export const createHunks = (
     return [];
   }
 
-  // Find change ranges (non-equal edits) extended by context.
-  const changeRanges: { start: number; end: number }[] = [];
-
-  for (let index = 0; index < edits.length; index++) {
-    const edit = edits[index]!;
-    if (edit.type === "equal") continue;
-
-    const start = Math.max(0, index - contextLines);
-    const end = Math.min(edits.length - 1, index + contextLines);
-
-    if (changeRanges.length > 0) {
-      const last = changeRanges[changeRanges.length - 1]!;
-      if (start <= last.end + 1) {
-        last.end = end;
-        continue;
-      }
-    }
-
-    changeRanges.push({ start, end });
-  }
-
-  return changeRanges.map((range) => {
-    const hunkLines: DiffLine[] = [];
-    let oldLine = 0;
-    let newLine = 0;
-
-    // Count lines before this hunk to compute starting line numbers.
-    for (let index = 0; index < range.start; index++) {
-      const edit = edits[index]!;
-      if (edit.type === "equal" || edit.type === "delete") {
-        oldLine++;
-      }
-      if (edit.type === "equal" || edit.type === "insert") {
-        newLine++;
-      }
-    }
-
-    const oldStart = oldLine + 1;
-    const newStart = newLine + 1;
-    let oldLinesCount = 0;
-    let newLinesCount = 0;
-
-    for (let index = range.start; index <= range.end; index++) {
-      const edit = edits[index]!;
-      switch (edit.type) {
-        case "equal": {
-          const text = oldLines[edit.oldIndex]!;
-          hunkLines.push({ type: "context", text });
-          oldLinesCount++;
-          newLinesCount++;
-          break;
-        }
-        case "insert": {
-          const text = newLines[edit.newIndex]!;
-          hunkLines.push({ type: "added", text });
-          newLinesCount++;
-          break;
-        }
-        case "delete": {
-          const text = oldLines[edit.oldIndex]!;
-          hunkLines.push({ type: "removed", text });
-          oldLinesCount++;
-          break;
-        }
-      }
-    }
-
-    return {
-      oldStart,
-      oldLines: oldLinesCount,
-      newStart,
-      newLines: newLinesCount,
-      lines: hunkLines,
-    };
-  });
+  const ranges = computeChangeRanges(edits, contextLines);
+  return ranges.map((range) => buildHunk(edits, oldLines, newLines, range));
 };
 
 /**
