@@ -2,6 +2,7 @@ import type { GitObject, Oid } from "@slim-git/types";
 import {
   buildObjectBytes,
   concatBytes,
+  concatChunks,
   parseObjectBytes,
   readUint32,
   type HashAlgorithm,
@@ -9,6 +10,7 @@ import {
 } from "@slim-git/core";
 import { createHash } from "node:crypto";
 import { deflateSync, Inflate } from "node:zlib";
+import { EMPTY, expand, last, map, Observable, of } from "rxjs";
 
 /** Packfile object type constants. */
 const PackObjectType = {
@@ -105,30 +107,20 @@ const decodeOffset = (
  * Returns the decompressed bytes and the number of compressed input bytes
  * consumed. This lets the packfile parser step from one object to the next.
  */
-const inflateObject = (
+const inflateObject$ = (
   input: Uint8Array,
-): Promise<{ readonly data: Uint8Array; readonly consumed: number }> =>
-  new Promise((resolve, reject) => {
+): Observable<{ readonly data: Uint8Array; readonly consumed: number }> =>
+  new Observable((subscriber) => {
     const inflate = new Inflate();
     const chunks: Uint8Array[] = [];
 
-    inflate.on("data", (chunk: Buffer) => {
-      chunks.push(new Uint8Array(chunk));
-    });
-
+    inflate.on("data", (chunk: Buffer) => chunks.push(new Uint8Array(chunk)));
     inflate.on("end", () => {
-      const data = chunks.reduce((acc, chunk) => {
-        const result = new Uint8Array(acc.length + chunk.length);
-        result.set(acc);
-        result.set(chunk, acc.length);
-        return result;
-      }, new Uint8Array(0));
-      resolve({ data, consumed: inflate.bytesWritten });
+      subscriber.next({ data: concatChunks(chunks), consumed: inflate.bytesWritten });
+      subscriber.complete();
     });
-
-    inflate.on("error", reject);
-    inflate.write(Buffer.from(input));
-    inflate.end();
+    inflate.on("error", (error) => subscriber.error(error));
+    inflate.end(Buffer.from(input));
   });
 
 /**
@@ -240,21 +232,13 @@ export const buildPackfile = (objects: readonly GitObject[]): Uint8Array => {
   // Canonical packfiles store objects sorted by oid ascending.
   entries.sort((a, b) => a.oid.localeCompare(b.oid));
 
-  const dataChunks: Uint8Array[] = [];
-
-  for (const entry of entries) {
+  const dataChunks = entries.flatMap((entry) => {
     const type = PackObjectType[entry.type];
     const header = encodeTypeSize(type, entry.raw.length);
     const compressed = deflateSync(Buffer.from(entry.raw));
-    dataChunks.push(header, new Uint8Array(compressed));
-  }
-
-  const data = dataChunks.reduce((acc, chunk) => {
-    const result = new Uint8Array(acc.length + chunk.length);
-    result.set(acc);
-    result.set(chunk, acc.length);
-    return result;
-  }, new Uint8Array(0));
+    return [header, new Uint8Array(compressed)];
+  });
+  const data = concatChunks(dataChunks);
 
   const header = new Uint8Array(PackMagic.length + 8);
   header.set(PackMagic);
@@ -269,21 +253,19 @@ export const buildPackfile = (objects: readonly GitObject[]): Uint8Array => {
   return concatBytes(concatBytes(header, data), new Uint8Array(checksum));
 };
 
+/** Parsed packfile header fields. */
+type PackHeader = {
+  readonly version: number;
+  readonly objectCount: number;
+  readonly dataStart: number;
+};
+
 /**
- * Parses a Git packfile (version 2) and reconstructs the contained objects.
+ * Validates the packfile header and trailing checksum.
  *
- * Supports `OBJ_COMMIT`, `OBJ_TREE`, `OBJ_BLOB`, `OBJ_TAG`, `OBJ_OFS_DELTA`,
- * and `OBJ_REF_DELTA`. Delta bases must be present in the packfile; external
- * bases are not resolved.
- *
- * @param buffer - Raw packfile bytes.
- * @param hashAlgorithm - Hash algorithm used to compute object ids.
- * @returns The decoded objects with their computed oids.
+ * Throws on malformed headers, unsupported versions, or checksum mismatches.
  */
-export const parsePackfile = async (
-  buffer: Uint8Array,
-  hashAlgorithm: HashAlgorithm,
-): Promise<readonly GitObject[]> => {
+const readPackHeader = (buffer: Uint8Array): PackHeader => {
   if (buffer.length < PackMagic.length + 8 + ChecksumLength) {
     throw new Error("Packfile too small");
   }
@@ -312,54 +294,165 @@ export const parsePackfile = async (
     }
   }
 
-  // Raw object bytes keyed by the offset where the object entry starts.
-  const rawByOffset = new Map<number, Uint8Array>();
-  // Completed objects keyed by oid, used to resolve REF_DELTA bases within the pack.
-  const objectsByOid = new Map<Oid, GitObject>();
+  return { version, objectCount, dataStart: PackMagic.length + 8 };
+};
 
-  let position = PackMagic.length + 8;
+/** A single object entry produced while streaming through a packfile. */
+type PackObjectEntry = {
+  readonly offset: number;
+  readonly raw: Uint8Array;
+  readonly object: GitObject;
+  readonly nextPosition: number;
+};
 
-  for (let index = 0; index < objectCount; index++) {
-    const entryStart = position;
-    const { type, size, bytesRead: headerBytes } = decodeTypeSize(buffer, position);
-    position += headerBytes;
+/** Immutable parser state carried between object entries. */
+type ParseState = {
+  readonly position: number;
+  readonly rawByOffset: ReadonlyMap<number, Uint8Array>;
+  readonly objectsByOid: ReadonlyMap<Oid, GitObject>;
+  readonly objects: readonly GitObject[];
+};
 
-    const { data, consumed } = await inflateObject(buffer.slice(position));
-    position += consumed;
-
-    if (data.length !== size) {
-      throw new Error(`Pack object size mismatch: expected ${size}, got ${data.length}`);
+/**
+ * Resolves a packfile object entry to its canonical raw bytes.
+ *
+ * Handles undeltified objects and both OFS_DELTA and REF_DELTA by locating the
+ * base object and applying the delta stream.
+ */
+const resolveRawObject = (
+  buffer: Uint8Array,
+  type: number,
+  data: Uint8Array,
+  entryStart: number,
+  positionAfterInflation: number,
+  rawByOffset: ReadonlyMap<number, Uint8Array>,
+  objectsByOid: ReadonlyMap<Oid, GitObject>,
+): { readonly raw: Uint8Array; readonly nextPosition: number } => {
+  if (type === PackObjectType.ofsDelta) {
+    const { value: offset, bytesRead: offsetBytes } = decodeOffset(
+      buffer,
+      positionAfterInflation,
+    );
+    const baseOffset = entryStart - offset;
+    const baseRaw = rawByOffset.get(baseOffset);
+    if (baseRaw === undefined) {
+      throw new Error(`Missing OFS_DELTA base at offset ${baseOffset}`);
     }
-
-    let raw: Uint8Array;
-
-    if (type === PackObjectType.ofsDelta) {
-      const { value: offset, bytesRead: offsetBytes } = decodeOffset(buffer, position);
-      position += offsetBytes;
-      const baseOffset = entryStart - offset;
-      const baseRaw = rawByOffset.get(baseOffset);
-      if (baseRaw === undefined) {
-        throw new Error(`Missing OFS_DELTA base at offset ${baseOffset}`);
-      }
-      raw = applyDelta(data, baseRaw);
-    } else if (type === PackObjectType.refDelta) {
-      const baseOid = new TextDecoder().decode(buffer.slice(position, position + 20)) as Oid;
-      position += 20;
-      const baseObject = objectsByOid.get(baseOid);
-      if (baseObject === undefined) {
-        throw new Error(`Missing REF_DELTA base ${baseOid}`);
-      }
-      raw = applyDelta(data, buildObjectBytes(baseObject.type, baseObject.content));
-    } else {
-      raw = data;
-    }
-
-    rawByOffset.set(entryStart, raw);
-
-    const { type: objectType, content } = parseObjectBytes(raw);
-    const object = hashAlgorithm.hashObject(objectType, content);
-    objectsByOid.set(object.oid, object);
+    return {
+      raw: applyDelta(data, baseRaw),
+      nextPosition: positionAfterInflation + offsetBytes,
+    };
   }
 
-  return Array.from(objectsByOid.values());
+  if (type === PackObjectType.refDelta) {
+    const baseOid = new TextDecoder().decode(
+      buffer.slice(positionAfterInflation, positionAfterInflation + ChecksumLength),
+    ) as Oid;
+    const baseObject = objectsByOid.get(baseOid);
+    if (baseObject === undefined) {
+      throw new Error(`Missing REF_DELTA base ${baseOid}`);
+    }
+    return {
+      raw: applyDelta(data, buildObjectBytes(baseObject.type, baseObject.content)),
+      nextPosition: positionAfterInflation + ChecksumLength,
+    };
+  }
+
+  return { raw: data, nextPosition: positionAfterInflation };
+};
+
+/**
+ * Parses the next object entry in a packfile starting at `position`.
+ *
+ * Inflates the object data, resolves any delta references, hashes the result,
+ * and returns the parsed entry together with the next byte position.
+ */
+const parseObjectEntry$ = (
+  buffer: Uint8Array,
+  position: number,
+  entryStart: number,
+  hashAlgorithm: HashAlgorithm,
+  rawByOffset: ReadonlyMap<number, Uint8Array>,
+  objectsByOid: ReadonlyMap<Oid, GitObject>,
+): Observable<PackObjectEntry> => {
+  const { type, size, bytesRead: headerBytes } = decodeTypeSize(buffer, position);
+  const dataStart = position + headerBytes;
+
+  return inflateObject$(buffer.slice(dataStart)).pipe(
+    map(({ data, consumed }) => {
+      if (data.length !== size) {
+        throw new Error(`Pack object size mismatch: expected ${size}, got ${data.length}`);
+      }
+
+      const positionAfterInflation = dataStart + consumed;
+      const { raw, nextPosition } = resolveRawObject(
+        buffer,
+        type,
+        data,
+        entryStart,
+        positionAfterInflation,
+        rawByOffset,
+        objectsByOid,
+      );
+
+      const { type: objectType, content } = parseObjectBytes(raw);
+      const object = hashAlgorithm.hashObject(objectType, content);
+
+      return {
+        offset: entryStart,
+        raw,
+        object,
+        nextPosition,
+      };
+    }),
+  );
+};
+
+/**
+ * Parses a Git packfile (version 2) and reconstructs the contained objects.
+ *
+ * Supports `OBJ_COMMIT`, `OBJ_TREE`, `OBJ_BLOB`, `OBJ_TAG`, `OBJ_OFS_DELTA`,
+ * and `OBJ_REF_DELTA`. Delta bases must be present in the packfile; external
+ * bases are not resolved.
+ *
+ * @param buffer - Raw packfile bytes.
+ * @param hashAlgorithm - Hash algorithm used to compute object ids.
+ * @returns An Observable that emits the decoded objects with their computed oids.
+ */
+export const parsePackfile$ = (
+  buffer: Uint8Array,
+  hashAlgorithm: HashAlgorithm,
+): Observable<readonly GitObject[]> => {
+  const header = readPackHeader(buffer);
+
+  const initialState: ParseState = {
+    position: header.dataStart,
+    rawByOffset: new Map(),
+    objectsByOid: new Map(),
+    objects: [],
+  };
+
+  return of(initialState).pipe(
+    expand((state) =>
+      state.objects.length >= header.objectCount
+        ? EMPTY
+        : parseObjectEntry$(
+            buffer,
+            state.position,
+            state.position,
+            hashAlgorithm,
+            state.rawByOffset,
+            state.objectsByOid,
+          ).pipe(
+            map((entry) => ({
+              position: entry.nextPosition,
+              rawByOffset: new Map(state.rawByOffset).set(entry.offset, entry.raw),
+              objectsByOid: new Map(state.objectsByOid).set(entry.object.oid, entry.object),
+              objects: [...state.objects, entry.object],
+            })),
+          ),
+    ),
+    last(),
+    map((state) => state.objects),
+  );
 };

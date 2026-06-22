@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { Sha1Hash } from "@slim-git/core";
 import type { GitObject } from "@slim-git/types";
-import { applyDelta, buildPackfile, parsePackfile } from "@slim-git/http";
+import { applyDelta, buildPackfile, parsePackfile$ } from "@slim-git/http";
+import { lastValueFrom } from "rxjs";
 
 const hash = Sha1Hash;
 
@@ -23,7 +24,7 @@ describe("buildPackfile / parsePackfile", () => {
   test("round-trips commit and blob objects", async () => {
     const objects = [commit("initial"), blob("hello")];
     const packfile = buildPackfile(objects);
-    const parsed = await parsePackfile(packfile, hash);
+    const parsed = await lastValueFrom(parsePackfile$(packfile, hash));
 
     expect(parsed).toHaveLength(2);
     for (const object of objects) {

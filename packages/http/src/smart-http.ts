@@ -2,7 +2,7 @@ import type { GitObject, Oid } from "@slim-git/types";
 import type { DiscoveredRef, PushCommand, PushReport, Transport } from "@slim-git/core";
 import { Sha1Hash, type HashAlgorithm } from "@slim-git/core";
 import { concatMap, from, map, type Observable, throwError } from "rxjs";
-import { buildPackfile, parsePackfile } from "./packfile.js";
+import { buildPackfile, parsePackfile$ } from "./packfile.js";
 import { decodePktLines, decodePktLineFrames, encodePktLines } from "./pkt-line.js";
 
 /** Result of the initial ref discovery exchange. */
@@ -99,7 +99,7 @@ export class SmartHttpTransport implements Transport {
         return from(response.arrayBuffer());
       }),
       map((buffer) => parseFetchResponse(new Uint8Array(buffer))),
-      concatMap((packfile) => from(parsePackfile(packfile, this.hashAlgorithm))),
+      concatMap((packfile) => parsePackfile$(packfile, this.hashAlgorithm)),
     );
   }
 

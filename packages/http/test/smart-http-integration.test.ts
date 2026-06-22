@@ -9,7 +9,7 @@ import {
   MemoryRefStore,
   MemoryWorkspaceBackend,
 } from "@slim-git/memory";
-import { buildPackfile, encodePktLines, parsePackfile, SmartHttpTransport } from "@slim-git/http";
+import { buildPackfile, encodePktLines, parsePackfile$, SmartHttpTransport } from "@slim-git/http";
 
 const person = {
   name: "Dev",
@@ -190,7 +190,7 @@ describe("SmartHttpTransport integration", () => {
         if (url.pathname === "/git-receive-pack") {
           const requestBytes = new Uint8Array(await req.arrayBuffer());
           const { commands, packfile } = splitPushRequest(requestBytes);
-          const objects = await parsePackfile(packfile, remote.objectStore.hashAlgorithm);
+          const objects = await lastValueFrom(parsePackfile$(packfile, remote.objectStore.hashAlgorithm));
 
           for (const object of objects) {
             await lastValueFrom(remoteBackend.writeObject(object));
