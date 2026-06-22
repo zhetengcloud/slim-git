@@ -1,6 +1,19 @@
 import type { IndexEntry, Oid } from "@slim-git/types";
+import { ParseError } from "@slim-git/types";
 import { Index } from "@slim-git/core";
 import { createHash } from "node:crypto";
+import {
+  concatMap,
+  defaultIfEmpty,
+  defer,
+  last,
+  map,
+  of,
+  range,
+  scan,
+  throwError,
+  type Observable,
+} from "rxjs";
 
 /**
  * Git index v2 binary codec.
@@ -21,7 +34,7 @@ const OID_BYTES = 20;
 /** Encodes an `Index` into a Git index v2 byte buffer. */
 export const encodeIndex = (index: Index): Uint8Array => {
   const entries = index.toArray();
-  const entryChunks = entries.map((entry) => encodeEntry(entry));
+  const entryChunks = entries.map((entry) => encodeIndexEntry(entry));
   const contentLength = 12 + entryChunks.reduce((sum, chunk) => sum + chunk.length, 0) + OID_BYTES;
 
   const buffer = new Uint8Array(contentLength);
@@ -43,37 +56,57 @@ export const encodeIndex = (index: Index): Uint8Array => {
   return buffer;
 };
 
-/** Decodes a Git index v2 byte buffer into an `Index`. */
-export const decodeIndex = (buffer: Uint8Array): Index => {
-  if (buffer.length < 12) {
-    throw new Error("Index buffer too short");
-  }
+/**
+ * Decodes a Git index v2 byte buffer into an `Index`.
+ *
+ * Returns an `Observable` so parse errors travel through RxJS's error channel
+ * and can be handled with `catchError` instead of thrown synchronously.
+ */
+export const decodeIndex = (buffer: Uint8Array): Observable<Index> =>
+  readIndexHeader(buffer).pipe(
+    concatMap(({ entryCount }) =>
+      range(0, entryCount).pipe(
+        scan(
+          (state) => {
+            const { entry, bytesRead } = decodeIndexEntry(buffer, state.offset);
+            return {
+              offset: state.offset + bytesRead,
+              entries: [...state.entries, entry],
+            };
+          },
+          { offset: 12, entries: [] as readonly IndexEntry[] },
+        ),
+        defaultIfEmpty({ offset: 12, entries: [] as readonly IndexEntry[] }),
+        last(),
+        map((state) => Index.from(state.entries)),
+      ),
+    ),
+  );
 
-  const signature = new TextDecoder().decode(buffer.slice(0, 4));
-  if (signature !== "DIRC") {
-    throw new Error(`Unsupported index signature: ${signature}`);
-  }
+/** Reads the index header and emits the entry count, or an error on bad input. */
+export const readIndexHeader = (
+  buffer: Uint8Array,
+): Observable<{ readonly entryCount: number }> =>
+  defer(() => {
+    if (buffer.length < 12) {
+      return throwError(() => new ParseError("index buffer too short"));
+    }
 
-  const version = readUint32(buffer, 4);
-  if (version !== VERSION) {
-    throw new Error(`Unsupported index version: ${version}`);
-  }
+    const signature = new TextDecoder().decode(buffer.slice(0, 4));
+    if (signature !== "DIRC") {
+      return throwError(() => new ParseError(`unsupported index signature: ${signature}`));
+    }
 
-  const entryCount = readUint32(buffer, 8);
-  const entries: IndexEntry[] = [];
-  let offset = 12;
+    const version = readUint32(buffer, 4);
+    if (version !== VERSION) {
+      return throwError(() => new ParseError(`unsupported index version: ${version}`));
+    }
 
-  for (let i = 0; i < entryCount; i++) {
-    const { entry, bytesRead } = decodeEntry(buffer, offset);
-    entries.push(entry);
-    offset += bytesRead;
-  }
-
-  return Index.from(entries);
-};
+    return of({ entryCount: readUint32(buffer, 8) });
+  });
 
 /** Encodes a single index entry. */
-const encodeEntry = (entry: IndexEntry): Uint8Array => {
+export const encodeIndexEntry = (entry: IndexEntry): Uint8Array => {
   const pathBytes = new TextEncoder().encode(entry.path);
   const pathPaddedLength = Math.ceil((pathBytes.length + 1) / 8) * 8;
   const entryLength = 62 + pathPaddedLength;
@@ -93,7 +126,7 @@ const encodeEntry = (entry: IndexEntry): Uint8Array => {
   buffer.set(oidToBytes(entry.oid), offset);
   offset += OID_BYTES;
 
-  offset = writeUint16(buffer, offset, buildFlags(entry));
+  offset = writeUint16(buffer, offset, buildIndexEntryFlags(entry));
 
   buffer.set(pathBytes, offset);
   offset += pathBytes.length;
@@ -104,7 +137,7 @@ const encodeEntry = (entry: IndexEntry): Uint8Array => {
 };
 
 /** Decodes a single index entry and returns the bytes consumed. */
-const decodeEntry = (
+export const decodeIndexEntry = (
   buffer: Uint8Array,
   start: number,
 ): { readonly entry: IndexEntry; readonly bytesRead: number } => {
@@ -172,14 +205,14 @@ const decodeEntry = (
 };
 
 /** Computes a SHA-1 checksum of the given bytes. */
-const computeChecksum = (data: Uint8Array): Uint8Array => {
+export const computeChecksum = (data: Uint8Array): Uint8Array => {
   const hash = createHash("sha1");
   hash.update(data);
   return new Uint8Array(hash.digest());
 };
 
 /** Converts a hex oid string to bytes. */
-const oidToBytes = (oid: Oid): Uint8Array => {
+export const oidToBytes = (oid: Oid): Uint8Array => {
   const result = new Uint8Array(OID_BYTES);
   for (let i = 0; i < OID_BYTES; i++) {
     result[i] = Number.parseInt(oid.slice(i * 2, i * 2 + 2), 16);
@@ -188,13 +221,13 @@ const oidToBytes = (oid: Oid): Uint8Array => {
 };
 
 /** Converts oid bytes to a lowercase hex string. */
-const bytesToOid = (bytes: Uint8Array): Oid =>
+export const bytesToOid = (bytes: Uint8Array): Oid =>
   Array.from(bytes)
     .map((byte) => byte.toString(16).padStart(2, "0"))
     .join("") as Oid;
 
 /** Builds the 16-bit flags field from an index entry. */
-const buildFlags = (entry: IndexEntry): number => {
+export const buildIndexEntryFlags = (entry: IndexEntry): number => {
   const nameLength = Math.min(entry.path.length, 0x0fff);
   const stage = (entry.stage & 0x03) << 12;
   const assumeValid = entry.assumeValid ? 0x8000 : 0;
@@ -202,33 +235,33 @@ const buildFlags = (entry: IndexEntry): number => {
 };
 
 /** Writes a 32-bit big-endian integer. */
-const writeUint32 = (buffer: Uint8Array, offset: number, value: number): number => {
+export const writeUint32 = (buffer: Uint8Array, offset: number, value: number): number => {
   const view = new DataView(buffer.buffer, buffer.byteOffset + offset, 4);
   view.setUint32(0, value, false);
   return offset + 4;
 };
 
 /** Reads a 32-bit big-endian integer. */
-const readUint32 = (buffer: Uint8Array, offset: number): number => {
+export const readUint32 = (buffer: Uint8Array, offset: number): number => {
   const view = new DataView(buffer.buffer, buffer.byteOffset + offset, 4);
   return view.getUint32(0, false);
 };
 
 /** Writes a 16-bit big-endian integer. */
-const writeUint16 = (buffer: Uint8Array, offset: number, value: number): number => {
+export const writeUint16 = (buffer: Uint8Array, offset: number, value: number): number => {
   const view = new DataView(buffer.buffer, buffer.byteOffset + offset, 2);
   view.setUint16(0, value, false);
   return offset + 2;
 };
 
 /** Reads a 16-bit big-endian integer. */
-const readUint16 = (buffer: Uint8Array, offset: number): number => {
+export const readUint16 = (buffer: Uint8Array, offset: number): number => {
   const view = new DataView(buffer.buffer, buffer.byteOffset + offset, 2);
   return view.getUint16(0, false);
 };
 
 /** Writes seconds and nanoseconds as two big-endian 32-bit integers. */
-const writeTimestamp = (
+export const writeTimestamp = (
   buffer: Uint8Array,
   offset: number,
   seconds: number,

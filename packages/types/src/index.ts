@@ -130,6 +130,13 @@ export class ConflictError extends SlimGitError {
   }
 }
 
+/** Thrown when a binary or text format cannot be parsed. */
+export class ParseError extends SlimGitError {
+  constructor(what: string) {
+    super(`Parse error: ${what}`);
+  }
+}
+
 /** Result returned by ref write operations. */
 export interface RefWriteResult {
   readonly ref: string;

@@ -16,7 +16,7 @@ export class NodeIndexStore implements IndexStore {
 
   read(): Observable<Index> {
     return from(readFile(this.indexPath())).pipe(
-      map((buffer) => decodeIndex(new Uint8Array(buffer))),
+      concatMap((buffer) => decodeIndex(new Uint8Array(buffer))),
       catchError((error) => {
         if (isNodeNotFoundError(error)) return of(Index.empty());
         return throwError(() => error);
