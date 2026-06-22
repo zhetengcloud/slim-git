@@ -1,7 +1,14 @@
 import type { Config } from "@slim-git/core";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
-import { catchError, concatMap, of, from, map, throwError, type Observable } from "rxjs";
+import {
+  catchError,
+  concatMap,
+  from,
+  map,
+  of,
+  type Observable,
+} from "rxjs";
 
 /**
  * A parsed config entry.
@@ -17,95 +24,96 @@ interface ConfigEntry {
 
 /** Checks whether an unknown value is a Node.js ENOENT error. */
 const isNodeNotFoundError = (error: unknown): boolean =>
-  typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
+  typeof error === "object" &&
+  error !== null &&
+  "code" in error &&
+  (error as { code: unknown }).code === "ENOENT";
 
 /**
  * Node.js filesystem implementation of `Config` backed by a Git config file.
  *
  * Supports the subset of Git config used by slim-git: flat sections and quoted
- * subsections such as `[remote "origin"]`. The file is loaded on first access
- * and rewritten after each mutation.
+ * subsections such as `[remote "origin"]`.
  */
 export class NodeConfig implements Config {
-  private entries: ConfigEntry[] = [];
-  private loaded = false;
-
   constructor(private readonly path: string) {}
 
   get(section: string, key: string): Observable<string | undefined> {
-    return this.load().pipe(
-      map(
-        () => this.entries.find((entry) => entry.section === section && entry.key === key)?.value,
+    return readConfigEntries(this.path).pipe(
+      map((entries) =>
+        entries.find((entry) => entry.section === section && entry.key === key),
       ),
+      map((entry) => entry?.value),
     );
   }
 
   set(section: string, key: string, value: string): Observable<void> {
-    return this.load().pipe(
-      map(() => {
-        const index = this.entries.findIndex(
-          (entry) => entry.section === section && entry.key === key,
-        );
-        if (index === -1) {
-          this.entries = [...this.entries, { section, key, value }];
-        } else {
-          this.entries = this.entries.map((entry, i) =>
-            i === index ? { section, key, value } : entry,
-          );
-        }
-      }),
-      concatMap(() => this.save()),
+    return readConfigEntries(this.path).pipe(
+      map((entries) => replaceEntry(entries, { section, key, value })),
+      concatMap((entries) => writeConfigEntries(this.path, entries)),
     );
   }
 
   remove(section: string, key: string): Observable<void> {
-    return this.load().pipe(
-      map(() => {
-        this.entries = this.entries.filter(
+    return readConfigEntries(this.path).pipe(
+      map((entries) =>
+        entries.filter(
           (entry) => !(entry.section === section && entry.key === key),
-        );
-      }),
-      concatMap(() => this.save()),
+        ),
+      ),
+      concatMap((entries) => writeConfigEntries(this.path, entries)),
     );
   }
 
   list(section: string): Observable<readonly [string, string][]> {
-    return this.load().pipe(
-      map(() =>
-        this.entries
+    return readConfigEntries(this.path).pipe(
+      map((entries) =>
+        entries
           .filter((entry) => entry.section === section)
           .map((entry): [string, string] => [entry.key, entry.value])
           .sort((a, b) => a[0].localeCompare(b[0])),
       ),
     );
   }
-
-  /** Loads the config file if it hasn't been loaded yet. */
-  private load(): Observable<void> {
-    if (this.loaded) return of(undefined);
-    return from(readFile(this.path, "utf-8")).pipe(
-      map((text) => {
-        this.entries = parseConfig(text);
-        this.loaded = true;
-      }),
-      catchError((error) => {
-        if (isNodeNotFoundError(error)) {
-          this.entries = [];
-          this.loaded = true;
-          return of(undefined);
-        }
-        return throwError(() => error);
-      }),
-    );
-  }
-
-  /** Writes the current entries back to the config file. */
-  private save(): Observable<void> {
-    return from(mkdir(dirname(this.path), { recursive: true })).pipe(
-      concatMap(() => from(writeFile(this.path, serializeConfig(this.entries)))),
-    );
-  }
 }
+
+/** Reads the config file, returning an empty array if it does not exist. */
+const readConfigEntries = (path: string): Observable<readonly ConfigEntry[]> =>
+  from(readFile(path, "utf-8")).pipe(
+    map((text) => parseConfig(text)),
+    catchError((error) => {
+      if (isNodeNotFoundError(error)) {
+        return of([]);
+      }
+      throw error;
+    }),
+  );
+
+/** Returns a new entries array with the given entry inserted or updated. */
+const replaceEntry = (
+  entries: readonly ConfigEntry[],
+  entry: ConfigEntry,
+): readonly ConfigEntry[] => {
+  const index = entries.findIndex(
+    (existing) =>
+      existing.section === entry.section && existing.key === entry.key,
+  );
+
+  if (index === -1) {
+    return [...entries, entry];
+  }
+
+  return entries.map((existing, i) => (i === index ? entry : existing));
+};
+
+/** Writes serialized config entries to the file, creating parent directories. */
+const writeConfigEntries = (
+  path: string,
+  entries: readonly ConfigEntry[],
+): Observable<void> =>
+  from(mkdir(dirname(path), { recursive: true })).pipe(
+    concatMap(() => from(writeFile(path, serializeConfig(entries)))),
+  );
 
 /** Parses a Git config file into flat Config entries. */
 const parseConfig = (text: string): ConfigEntry[] => {
@@ -159,7 +167,7 @@ const unquote = (value: string): string => {
 };
 
 /** Serializes flat Config entries into a Git config file. */
-const serializeConfig = (entries: ConfigEntry[]): string => {
+const serializeConfig = (entries: readonly ConfigEntry[]): string => {
   const groups = groupEntries(entries);
   const lines: string[] = [];
 
@@ -184,8 +192,11 @@ const serializeConfig = (entries: ConfigEntry[]): string => {
 };
 
 /** Groups entries by section, then by subsection, preserving input order. */
-const groupEntries = (entries: ConfigEntry[]): Map<string, Map<string, [string, string][]>> => {
+const groupEntries = (
+  entries: readonly ConfigEntry[],
+): Map<string, Map<string, [string, string][]>> => {
   const groups = new Map<string, Map<string, [string, string][]>>();
+
 
   for (const { section, key, value } of entries) {
     const dotIndex = key.indexOf(".");
